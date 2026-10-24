@@ -254,9 +254,15 @@ async fn sample_loop(
 
 fn average_working_set(samples : Array[ResourceSample]) -> Int {
   if samples.length() == 0 { return 0 }
-  let mut total = 0
-  for sample in samples { total = total + sample.working_set_bytes }
-  total / samples.length()
+  // Keep the accumulator bounded; a long small-file run can otherwise
+  // overflow MoonBit's platform Int when summing many RSS samples.
+  let mut average = 0
+  let mut count = 0
+  for sample in samples {
+    count = count + 1
+    average = average + (sample.working_set_bytes - average) / count
+  }
+  average
 }
 
 fn peak_working_set(samples : Array[ResourceSample]) -> Int {
@@ -269,9 +275,13 @@ fn peak_working_set(samples : Array[ResourceSample]) -> Int {
 
 fn average_private_bytes(samples : Array[ResourceSample]) -> Int {
   if samples.length() == 0 { return 0 }
-  let mut total = 0
-  for sample in samples { total = total + sample.private_bytes }
-  total / samples.length()
+  let mut average = 0
+  let mut count = 0
+  for sample in samples {
+    count = count + 1
+    average = average + (sample.private_bytes - average) / count
+  }
+  average
 }
 
 fn peak_private_bytes(samples : Array[ResourceSample]) -> Int {
@@ -362,6 +372,14 @@ fn cli_program(project : String, full : Bool, windows : Bool) -> String {
   )
 }
 
+fn backend_args(args : Array[String], io_backend : String) -> Array[String] {
+  if io_backend == "platform" || io_backend == "auto" {
+    args
+  } else {
+    [..args, "--io-backend", io_backend]
+  }
+}
+
 fn target_list(
   project : String,
   windows : Bool,
@@ -369,6 +387,7 @@ fn target_list(
   root : String,
   _cert : String,
   _key : String,
+  io_backend : String,
 ) -> Array[Target] {
   let node = node_program(project)
   let full_cli = cli_program(project, true, windows)
@@ -380,12 +399,12 @@ fn target_list(
     {
       name: "cli-full",
       program: full_cli,
-      args: ["--silent", "--port", port, root],
+      args: backend_args(["--silent", "--port", port, root], io_backend),
     },
     {
       name: "cli-thin",
       program: thin_cli,
-      args: ["--silent", "--port", port, root],
+      args: backend_args(["--silent", "--port", port, root], io_backend),
     },
     {
       name: "napi",
@@ -424,12 +443,18 @@ fn target_env(
   root : String,
   cert : String,
   key : String,
+  io_backend : String,
 ) -> Map[String, String] {
   let env : Map[String, String] = Map([])
   if target.name == "napi" || target.name == "wasmgc" {
     env["HS_PROJECT_ROOT"] = project
     env["HS_ROOT"] = root
-    env["HS_CONFIG"] = "{\"root\":\"" + root + "\"}"
+    let backend_config = if target.name == "napi" && io_backend != "platform" {
+      ",\"io_backend\":\"" + io_backend + "\""
+    } else {
+      ""
+    }
+    env["HS_CONFIG"] = "{\"root\":\"" + root + "\"" + backend_config + "}"
     if protocol == "https" {
       env["HS_TLS"] = "1"
       env["HS_CERT"] = cert
@@ -453,6 +478,77 @@ async fn write_urls(protocol : String, port : String, count : Int, small_count :
   path
 }
 
+async fn load_args(
+  tool : String,
+  protocol : String,
+  workload : String,
+  port : String,
+  requests : Int,
+  connections : Int,
+  small_count : Int,
+  output : String,
+) -> Array[String] {
+  let scheme = if protocol == "https" { "https" } else { "http" }
+  let insecure = protocol == "https"
+  if tool == "siege" {
+    let repetitions = if workload == "large" { requests } else { 1 }
+    let args = [
+      "-b", "-q", "-j", "-c", connections.to_string(), "-r", repetitions.to_string(),
+      "--no-parser",
+    ]
+    if workload == "large" {
+      args.push(url(scheme, port, "/large.bin"))
+    } else {
+      args.push("-f")
+      args.push(write_urls(protocol, port, small_count, small_count))
+    }
+    ignore(insecure)
+    ignore(output)
+    args
+  } else if workload == "large" {
+    let args = [
+      "--no-tui", "-n", requests.to_string(), "-c", connections.to_string(),
+      "--output-format", "json", "--output", output,
+    ]
+    if insecure { args.push("--insecure") }
+    args.push(url(scheme, port, "/large.bin"))
+    args
+  } else {
+    let urls = write_urls(protocol, port, requests, small_count)
+    let args = [
+      "--no-tui", "-n", requests.to_string(), "-c", connections.to_string(),
+      "--output-format", "json", "--output", output, "--urls-from-file",
+    ]
+    if insecure { args.push("--insecure") }
+    args.push(urls)
+    args
+  }
+}
+
+async fn run_load(
+  tool : String,
+  args : Array[String],
+  output : String,
+) -> Int {
+  if tool == "siege" {
+    let (code, stdout, _) = @process.collect_output(
+      "siege",
+      args,
+      extra_env=Map([("NO_COLOR", "true")]),
+    )
+    @fs.write_file(output, stdout.text())
+    code
+  } else {
+    @shell.Cmd(
+      "oha",
+      args,
+      env=Map([("NO_COLOR", "true")]),
+      stdout=@shell.Redirect::Discard,
+      stderr=@shell.Redirect::Discard,
+    ).status()
+  }
+}
+
 async fn ready(
   scheme : String,
   port : String,
@@ -465,7 +561,9 @@ async fn ready(
     "curl"
   }
   let mut ok = false
-  for _ in 0..<30 {
+  // Node hosts loaded from a mounted Windows filesystem can take several
+  // seconds to initialize under WSL. Keep readiness bounded but generous.
+  for _ in 0..<100 {
     if !ok {
       let args = ["-fsS", "--max-time", "0.2", "-o", if @env.get_env_var("OS") == Some("Windows_NT") { "NUL" } else { "/dev/null" }]
       if insecure { args.push("-k") }
@@ -497,34 +595,28 @@ async fn run_case(
   platform : String,
   windows : Bool,
   result_dir : String,
+  io_backend : String,
+  load_tool : String,
 ) -> Unit {
   let scheme = if protocol == "https" { "https" } else { "http" }
   let insecure = protocol == "https"
-  let case_name = "\{platform}-\{target.name}-\{protocol}-\{workload}"
+  let case_name = "\{platform}-\{io_backend}-\{target.name}-\{protocol}-\{workload}"
   let output = "\{result_dir}/\{case_name}.json"
   let stdout_log = "\{result_dir}/logs/\{case_name}.stdout.log"
   let stderr_log = "\{result_dir}/logs/\{case_name}.stderr.log"
   let resources = "\{result_dir}/resources/\{case_name}.csv"
   let command = with_tls_args(target, protocol, cert, key)
-  let env = target_env(command, project, port, protocol, root, cert, key)
-  let oha_args = if workload == "large" {
-    let args = [
-      "--no-tui", "-n", requests.to_string(), "-c", connections.to_string(),
-      "--output-format", "json", "--output", output,
-    ]
-    if insecure { args.push("--insecure") }
-    args.push(url(scheme, port, "/large.bin"))
-    args
-  } else {
-    let urls = write_urls(protocol, port, requests, small_count)
-    let args = [
-      "--no-tui", "-n", requests.to_string(), "-c", connections.to_string(),
-      "--output-format", "json", "--output", output, "--urls-from-file",
-    ]
-    if insecure { args.push("--insecure") }
-    args.push(urls)
-    args
-  }
+  let env = target_env(command, project, port, protocol, root, cert, key, io_backend)
+  let request_args = load_args(
+    load_tool,
+    protocol,
+    workload,
+    port,
+    requests,
+    connections,
+    small_count,
+    output,
+  )
   @async.with_task_group() <| group => {
     let stdout = @process.redirect_to_file(stdout_log)
     let stderr = @process.redirect_to_file(stderr_log)
@@ -545,14 +637,8 @@ async fn run_case(
     let mut exit_code = -1
     if is_ready {
       let sampler = group.spawn(() => sample_loop(process.pid, windows, done, previous, samples))
-      let oha = group.spawn(() => @shell.Cmd(
-          "oha",
-          oha_args,
-          env=Map([("NO_COLOR", "true")]),
-          stdout=@shell.Redirect::Discard,
-          stderr=@shell.Redirect::Discard,
-        ).status())
-      exit_code = oha.wait()
+      let load = group.spawn(() => run_load(load_tool, request_args, output))
+      exit_code = load.wait()
       done.val = true
       ignore(sampler.wait())
       sample_once(process.pid, windows, previous, samples)
@@ -571,7 +657,7 @@ async fn run_case(
     }
     @fs.write_file(
       "\{result_dir}/index.csv",
-      "\{platform},\{target.name},\{protocol},\{workload},\{requests},\{connections},\{exit_code},\{output}," +
+      "\{platform},\{io_backend},\{target.name},\{protocol},\{workload},\{requests},\{connections},\{exit_code},\{output}," +
         resource_summary(windows, process.pid, samples.val, source, resources) + "\n",
       create_mode=@fs.CreateMode::OpenOrCreate,
       append=true,
@@ -600,6 +686,10 @@ async fn main {
   let target_filter = arg_value(args, "--target", "all")
   let protocol_filter = arg_value(args, "--protocol", "all")
   let workload_filter = arg_value(args, "--workload", "all")
+  let io_backend = @env.get_env_var("BENCH_IO_BACKEND").unwrap_or(
+    arg_value(args, "--io-backend", "platform"),
+  )
+  let load_tool = @env.get_env_var("BENCH_LOAD_TOOL").unwrap_or("oha")
   let cert = arg_value(args, "--cert", "state/certs/server.crt")
   let key = arg_value(args, "--key", "state/certs/server.key")
   let result_dir = @env.get_env_var("BENCH_RESULT_DIR").unwrap_or("results")
@@ -611,10 +701,10 @@ async fn main {
   }
   @fs.write_file(
     result_dir + "/index.csv",
-    "platform,target,protocol,workload,requests,connections,exit_code,output,pid,resource_samples,cpu_avg_percent,cpu_peak_percent,working_set_avg_bytes,working_set_peak_bytes,private_bytes_avg_bytes,private_bytes_peak_bytes,private_bytes_supported,resource_source,resources\n",
+    "platform,io_backend,target,protocol,workload,requests,connections,exit_code,output,pid,resource_samples,cpu_avg_percent,cpu_peak_percent,working_set_avg_bytes,working_set_peak_bytes,private_bytes_avg_bytes,private_bytes_peak_bytes,private_bytes_supported,resource_source,resources\n",
     append=false,
   )
-  let targets = target_list(project, windows, port, root, cert, key)
+  let targets = target_list(project, windows, port, root, cert, key, io_backend)
   for target in targets {
     if selected(target_filter, target.name) {
       for protocol in ["http", "https"] {
@@ -622,7 +712,7 @@ async fn main {
           if protocol == "https" && target.name == "cli-thin" {
             @fs.write_file(
               result_dir + "/index.csv",
-              "\{platform},\{target.name},\{protocol},unsupported,0,0,0,,,,,,,,,,false,unsupported,\n",
+              "\{platform},\{io_backend},\{target.name},\{protocol},unsupported,0,0,0,,,,,,,,,,false,unsupported,\n",
               create_mode=@fs.CreateMode::OpenOrCreate,
               append=true,
             )
@@ -645,6 +735,8 @@ async fn main {
                   platform,
                   windows,
                   result_dir,
+                  io_backend,
+                  load_tool,
                 )
               }
             }

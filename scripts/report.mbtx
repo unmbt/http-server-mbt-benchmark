@@ -1,0 +1,218 @@
+import {
+  "moonbitlang/async",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/async/fs",
+}
+
+struct Row {
+  platform : String
+  backend : String
+  target : String
+  protocol : String
+  workload : String
+  requests : String
+  connections : String
+  exit_code : String
+  output : String
+  requests_per_sec : String
+  size_per_sec : String
+  success_rate : String
+  total_seconds : String
+  total_data_bytes : String
+  cpu_avg_percent : String
+  cpu_peak_percent : String
+  working_set_avg_bytes : String
+  working_set_peak_bytes : String
+  private_bytes_avg_bytes : String
+  private_bytes_peak_bytes : String
+  private_bytes_supported : String
+  resource_source : String
+}
+
+fn arg_value(args : ArrayView[String], name : String, fallback : String) -> String {
+  for i = 1; i < args.length(); i = i + 1 {
+    if args[i] == name && i + 1 < args.length() { return args[i + 1] }
+    if args[i].has_prefix(name + "=") { return args[i][name.length() + 1:].to_owned() }
+  }
+  fallback
+}
+
+fn field(fields : ArrayView[StringView], index : Int) -> String {
+  if index < fields.length() { fields[index].trim().to_owned() } else { "" }
+}
+
+fn json_number(value : Json?) -> String {
+  match value {
+    Some(Number(n, ..)) => n.to_string()
+    _ => ""
+  }
+}
+
+fn summary_number(value : Json, key : String) -> String {
+  guard value is Object(top) else { return "" }
+  guard top.get("summary") is Some(Object(summary)) else { return "" }
+  json_number(summary.get(key))
+}
+
+async fn json_metrics(path : String) -> (String, String, String, String, String) {
+  let text = @fs.read_file(path).text() catch { _ => return ("", "", "", "", "") }
+  let value = @json.parse(text) catch { _ => return ("", "", "", "", "") }
+  (
+    summary_number(value, "requestsPerSec"),
+    summary_number(value, "sizePerSec"),
+    summary_number(value, "successRate"),
+    summary_number(value, "total"),
+    summary_number(value, "totalData"),
+  )
+}
+
+async fn read_index(path : String, rows : Ref[Array[Row]]) -> Unit {
+  let text = @fs.read_file(path).text() catch { _ => return }
+  let lines = text.split("\n").to_array()
+  if lines.length() < 2 { return }
+  let new_format = lines[0].trim().has_prefix("platform,io_backend,")
+  for line in lines[1:] {
+    let trimmed = line.trim()
+    if trimmed.length() == 0 { continue }
+    let fields = trimmed.split(",").to_array()
+    let shift = if new_format { 1 } else { 0 }
+    let platform = field(fields, 0)
+    let backend = if new_format { field(fields, 1) } else { "platform" }
+    let target = field(fields, 1 + shift)
+    let protocol = field(fields, 2 + shift)
+    let workload = field(fields, 3 + shift)
+    let output = field(fields, 7 + shift)
+    let metrics = if output == "" { ("", "", "", "", "") } else { json_metrics(output) }
+    rows.val.push({
+      platform,
+      backend,
+      target,
+      protocol,
+      workload,
+      requests: field(fields, 4 + shift),
+      connections: field(fields, 5 + shift),
+      exit_code: field(fields, 6 + shift),
+      output,
+      requests_per_sec: metrics.0,
+      size_per_sec: metrics.1,
+      success_rate: metrics.2,
+      total_seconds: metrics.3,
+      total_data_bytes: metrics.4,
+      cpu_avg_percent: field(fields, 10 + shift),
+      cpu_peak_percent: field(fields, 11 + shift),
+      working_set_avg_bytes: field(fields, 12 + shift),
+      working_set_peak_bytes: field(fields, 13 + shift),
+      private_bytes_avg_bytes: field(fields, 14 + shift),
+      private_bytes_peak_bytes: field(fields, 15 + shift),
+      private_bytes_supported: field(fields, 16 + shift),
+      resource_source: field(fields, 17 + shift),
+    })
+  }
+}
+
+fn csv_escape(value : String) -> String {
+  if value.contains(",") || value.contains("\"") || value.contains("\n") {
+    "\"" + value.replace_all(old="\"", new="\"\"") + "\""
+  } else { value }
+}
+
+fn csv_row(row : Row) -> String {
+  [
+    row.platform, row.backend, row.target, row.protocol, row.workload,
+    row.requests, row.connections, row.exit_code, row.requests_per_sec,
+    row.size_per_sec, row.success_rate, row.total_seconds, row.total_data_bytes,
+    row.cpu_avg_percent, row.cpu_peak_percent, row.working_set_avg_bytes,
+    row.working_set_peak_bytes, row.private_bytes_avg_bytes,
+    row.private_bytes_peak_bytes, row.private_bytes_supported,
+    row.resource_source, row.output,
+  ].map(csv_escape).join(",")
+}
+
+fn display(value : String) -> String {
+  if value == "" { "—" } else { value }
+}
+
+fn markdown_table(rows : Array[Row]) -> String {
+  let out = StringBuilder()
+  out.write_string("| 平台 | backend | target | 协议 | 负载 | 请求/s | bytes/s | 成功率 | CPU 平均% | CPU 峰值% | RSS 平均 bytes | RSS 峰值 bytes |\n")
+  out.write_string("|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|\n")
+  for row in rows {
+    out.write_string("| \{row.platform} | \{row.backend} | \{row.target} | \{row.protocol} | \{row.workload} | \{display(row.requests_per_sec)} | \{display(row.size_per_sec)} | \{display(row.success_rate)} | \{display(row.cpu_avg_percent)} | \{display(row.cpu_peak_percent)} | \{display(row.working_set_avg_bytes)} | \{display(row.working_set_peak_bytes)} |\n")
+  }
+  out.to_string()
+}
+
+fn html_escape(value : String) -> String {
+  value.replace_all(old="&", new="&amp;")
+    .replace_all(old="<", new="&lt;")
+    .replace_all(old=">", new="&gt;")
+    .replace_all(old="\"", new="&quot;")
+}
+
+fn js_quote(value : String) -> String {
+  "\"" + value.replace_all(old="\\", new="\\\\").replace_all(old="\"", new="\\\"") + "\""
+}
+
+fn html_rows(rows : Array[Row]) -> String {
+  let out = StringBuilder()
+  for row in rows {
+    out.write_string("<tr data-platform=\"\{html_escape(row.platform)}\" data-backend=\"\{html_escape(row.backend)}\" data-target=\"\{html_escape(row.target)}\" data-protocol=\"\{html_escape(row.protocol)}\" data-workload=\"\{html_escape(row.workload)}\">")
+    for value in [
+      row.platform, row.backend, row.target, row.protocol, row.workload,
+      row.requests_per_sec, row.size_per_sec, row.success_rate,
+      row.cpu_avg_percent, row.cpu_peak_percent,
+      row.working_set_avg_bytes, row.working_set_peak_bytes,
+    ] { out.write_string("<td>" + html_escape(display(value)) + "</td>") }
+    out.write_string("</tr>\n")
+  }
+  out.to_string()
+}
+
+fn js_data(rows : Array[Row]) -> String {
+  let out = StringBuilder()
+  out.write_char('[')
+  let mut first = true
+  for row in rows {
+    if !first { out.write_char(',') }
+    first = false
+    out.write_string("{platform:\{js_quote(row.platform)},backend:\{js_quote(row.backend)},target:\{js_quote(row.target)},protocol:\{js_quote(row.protocol)},workload:\{js_quote(row.workload)},rps:\{js_quote(row.requests_per_sec)},mib:\{js_quote(row.size_per_sec)},cpu:\{js_quote(row.cpu_avg_percent)},rss:\{js_quote(row.working_set_avg_bytes)}}")
+  }
+  out.write_char(']')
+  out.to_string()
+}
+
+async fn write_report(out_dir : String, rows : Array[Row]) -> Unit {
+  if !@fs.exists(out_dir) { @fs.mkdir(out_dir, recursive=true) }
+  let csv = StringBuilder()
+  csv.write_string("platform,backend,target,protocol,workload,requests,connections,exit_code,requests_per_sec,size_per_sec,success_rate,total_seconds,total_data_bytes,cpu_avg_percent,cpu_peak_percent,working_set_avg_bytes,working_set_peak_bytes,private_bytes_avg_bytes,private_bytes_peak_bytes,private_bytes_supported,resource_source,output\n")
+  for row in rows { csv.write_string(csv_row(row) + "\n") }
+  @fs.write_file(out_dir + "/summary.csv", csv.to_string())
+
+  let markdown = StringBuilder()
+  markdown.write_string("# http-server-mbt benchmark comparison\n\n")
+  markdown.write_string("本报告合并 Windows `oha` 基线与 WSL Linux 的 `platform`、`epoll`、`io_uring` 记录。大文件看请求/s 与 bytes/s（HTML 图表将 bytes/s 换算为 MiB/s），小文件看请求/s；CPU 和 RSS 只采样 server 进程。Linux private bytes 不可用，Thin HTTPS 是设计上的 unsupported。\n\n")
+  markdown.write_string(markdown_table(rows))
+  @fs.write_file(out_dir + "/comparison.md", markdown.to_string())
+
+  let body = html_rows(rows)
+  let data = js_data(rows)
+  let html = "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>http-server-mbt benchmark</title><style>body{font:14px system-ui,sans-serif;margin:24px;background:#fff;color:#202124}select{margin-right:12px;padding:4px}table{border-collapse:collapse;width:100%;font-size:12px}th,td{border:1px solid #dadce0;padding:5px;text-align:right}th:nth-child(-n+5),td:nth-child(-n+5){text-align:left}th{position:sticky;top:0;background:#fff}.chart{margin:20px 0}.bar{display:flex;gap:8px;align-items:center;margin:4px 0}.name{width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.track{height:16px;background:#e8eaed;flex:1}.fill{height:100%;background:#1769aa}.value{width:100px;text-align:right;color:#5f6368}@media(prefers-color-scheme:dark){body{background:#202124;color:#e8eaed}th{background:#202124}select{background:#202124;color:#e8eaed}.track{background:#5f6368}.fill{background:#8ab4f8}}</style></head><body><h1>http-server-mbt benchmark comparison</h1><p>Windows baseline versus WSL Linux backends; server CPU/RSS exclude the load generator.</p><div id=\"filters\"></div><div id=\"charts\"></div><h2>All cases</h2><div style=\"overflow:auto\"><table id=\"table\"><thead><tr><th>platform</th><th>backend</th><th>target</th><th>protocol</th><th>workload</th><th>requests/s</th><th>bytes/s</th><th>success</th><th>CPU avg%</th><th>CPU peak%</th><th>RSS avg bytes</th><th>RSS peak bytes</th></tr></thead><tbody>" + body + "</tbody></table></div><script>const data=" + data + ";const fields=['platform','backend','target','protocol','workload'];const labels={rps:'requests/s',mib:'MiB/s',cpu:'CPU average %',rss:'RSS average MiB'};const filters=document.getElementById('filters');const selects={};for(const f of fields){const s=document.createElement('select');s.id=f;s.innerHTML='<option>all</option>';for(const v of [...new Set(data.map(x=>x[f]))].sort())s.innerHTML+='<option>'+v+'</option>';s.onchange=render;filters.append(f+' ',s);selects[f]=s}function rows(){return data.filter(x=>fields.every(f=>selects[f].value==='all'||selects[f].value===x[f]))}function render(){const rs=rows();document.querySelectorAll('#table tbody tr').forEach(t=>t.style.display=fields.every(f=>selects[f].value==='all'||selects[f].value===t.dataset[f])?'':'none');const root=document.getElementById('charts');root.innerHTML='';for(const k of ['rps','mib','cpu','rss']){const vals=rs.map(x=>[x,k==='mib'?Number(x[k])/1048576:Number(x[k])]).filter(x=>Number.isFinite(x[1]));const box=document.createElement('section');box.className='chart';box.innerHTML='<h2>'+labels[k]+'</h2>';const max=Math.max(...vals.map(x=>x[1]),1);for(const [x,v] of vals.sort((a,b)=>b[1]-a[1])){const b=document.createElement('div');b.className='bar';const n=document.createElement('span');n.className='name';n.textContent=[x.platform,x.backend,x.target,x.protocol,x.workload].join(' / ');const t=document.createElement('span');t.className='track';const fill=document.createElement('span');fill.className='fill';fill.style.width=v/max*100+'%';t.append(fill);const q=document.createElement('span');q.className='value';q.textContent=k==='rss'?(v/1048576).toFixed(1)+' MiB':k==='mib'?v.toFixed(2)+' MiB/s':v.toFixed(2);b.append(n,t,q);box.append(b)}root.append(box)}}render();</script></body></html>"
+  @fs.write_file(out_dir + "/report.html", html)
+}
+
+async fn main {
+  let args = @env.args()
+  let out_dir = arg_value(args, "--out", "records/20261024-comparison")
+  let rows = Ref([])
+  let dirs = [
+    arg_value(args, "--windows", "records/windows-20261024-resources"),
+    arg_value(args, "--linux-platform", "records/linux-20261024-platform"),
+    arg_value(args, "--linux-epoll", "records/linux-20261024-epoll"),
+    arg_value(args, "--linux-io-uring", "records/linux-20261024-io_uring"),
+  ]
+  for dir in dirs { read_index(dir + "/index.csv", rows) }
+  write_report(out_dir, rows.val)
+  println("rows=" + rows.val.length().to_string())
+  println("out=" + out_dir)
+}
