@@ -1,0 +1,160 @@
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/shell",
+  "moonbitlang/core/env",
+}
+
+fn arg_value(args : ArrayView[String], name : String, fallback : String) -> String {
+  for i = 1; i < args.length(); i = i + 1 {
+    if args[i] == name && i + 1 < args.length() { return args[i + 1] }
+    if args[i].has_prefix(name + "=") { return args[i][name.length() + 1:].to_owned() }
+  }
+  fallback
+}
+
+fn positive(value : String, fallback : Int) -> Int {
+  if value.length() == 0 { return fallback }
+  let mut n = 0
+  for c in value {
+    if c < '0' || c > '9' { return fallback }
+    n = n * 10 + c.to_int() - '0'.to_int()
+  }
+  if n > 0 { n } else { fallback }
+}
+
+fn parse_values(value : String, fallback : Array[Int]) -> Array[Int] {
+  if value.length() == 0 { return fallback }
+  let result : Array[Int] = []
+  for part in value.split(",") {
+    let n = positive(part.to_owned(), 0)
+    if n > 0 { result.push(n) }
+  }
+  if result.length() == 0 { fallback } else { result }
+}
+
+fn env_value(name : String, fallback : String) -> String {
+  @env.get_env_var(name).unwrap_or(fallback)
+}
+
+fn backend_offset(backend : String) -> Int {
+  if backend == "epoll" {
+    10000
+  } else if backend == "io_uring" {
+    20000
+  } else {
+    0
+  }
+}
+
+async fn run_scan(
+  moon : String,
+  project : String,
+  result_root : String,
+  backend : String,
+  connections : Int,
+  duration : String,
+  requests : Int,
+  small_count : Int,
+  root : String,
+  cert : String,
+  key : String,
+  port : Int,
+  target_filter : String,
+  protocol_filter : String,
+  workload_filter : String,
+) -> Int {
+  let result_dir = "\{result_root}/\{backend}-c\{connections}"
+  if !@fs.exists(result_dir) { @fs.mkdir(result_dir, recursive=true) }
+  let child_env : Map[String, String] = Map([
+    ("BENCH_PLATFORM", "linux"),
+    ("BENCH_IO_BACKEND", backend),
+    ("BENCH_LOAD_TOOL", "oha"),
+    ("BENCH_RESULT_DIR", result_dir),
+    ("HS_PROJECT_ROOT", project),
+    ("HS_NODE", env_value("HS_NODE", "/usr/bin/node")),
+    ("HS_CLI_FULL", env_value("HS_CLI_FULL", project + "/target/candidate/cli/http-server-mbt-linux-amd64")),
+    ("HS_CLI_THIN", env_value("HS_CLI_THIN", project + "/target/candidate/cli/http-server-mbt-thin-linux-amd64")),
+    ("HS_ORIGINAL_BIN", env_value("HS_ORIGINAL_BIN", project + "/http-server/bin/http-server")),
+    ("PATH", env_value("PATH", "/root/.cargo/bin:/root/.moon/bin:/usr/bin:/bin")),
+  ])
+  let args = [
+    "run", "scripts/run.mbtx", "--",
+    "--project-root", project,
+    "--root", root,
+    "--port", port.to_string(),
+    "--requests", requests.to_string(),
+    "--connections", connections.to_string(),
+    "--duration", duration,
+    "--small-count", small_count.to_string(),
+    "--cert", cert,
+    "--key", key,
+    "--target", target_filter,
+    "--protocol", protocol_filter,
+    "--workload", workload_filter,
+  ]
+  println("scan backend=\{backend} connections=\{connections} duration=\{duration}")
+  @shell.Cmd(
+    moon,
+    args,
+    env=child_env,
+    stdout=@shell.Redirect::Inherit,
+    stderr=@shell.Redirect::Inherit,
+  ).status()
+}
+
+async fn main {
+  let args = @env.args()
+  let project = env_value("HS_PROJECT_ROOT", arg_value(args, "--project-root", ""))
+  if project == "" { fail("HS_PROJECT_ROOT or --project-root is required") }
+  let result_root = env_value(
+    "BENCH_CONCURRENCY_ROOT",
+    arg_value(args, "--out", "records/linux-20261024-concurrency"),
+  )
+  let root = arg_value(args, "--root", "data/public")
+  let cert = arg_value(args, "--cert", "state/certs/server.crt")
+  let key = arg_value(args, "--key", "state/certs/server.key")
+  let port_base = positive(arg_value(args, "--port-base", "18080"), 18080)
+  let moon = env_value("BENCH_MOON", "moon")
+  let duration = arg_value(args, "--duration", "5s")
+  let requests = positive(arg_value(args, "--requests", "4"), 4)
+  let small_count = positive(arg_value(args, "--small-count", "2048"), 2048)
+  let target_filter = arg_value(args, "--target", "all")
+  let protocol_filter = arg_value(args, "--protocol", "all")
+  let workload_filter = arg_value(args, "--workload", "small-files")
+  let connections = parse_values(arg_value(args, "--connections", "4,100,200,500,1000,2000"), [4, 100, 200, 500, 1000, 2000])
+  let backends = arg_value(args, "--backends", "platform,epoll,io_uring").split(",")
+  if !@fs.exists(result_root) { @fs.mkdir(result_root, recursive=true) }
+  @fs.write_file(
+    result_root + "/README.md",
+    "# Linux concurrency scan\n\n" +
+      "Each directory is one Linux I/O backend and connection count. The run uses `oha -z " + duration + " -c N`, a 64 MiB large-file fixture or 2048 small files depending on the selected workload, and samples server CPU/RSS.\n\n" +
+      "The scan intentionally starts at 4, 100, 200, 500, 1000 and 2000 connections. Extend only after checking the host `ulimit -n`, server file-descriptor limits and WSL memory.\n",
+  )
+  for backend_view in backends {
+    let backend = backend_view.to_owned()
+    for connections_value in connections {
+      let code = run_scan(
+        moon,
+        project,
+        result_root,
+        backend,
+        connections_value,
+        duration,
+        requests,
+        small_count,
+        root,
+        cert,
+        key,
+        port_base + backend_offset(backend) + connections_value,
+        target_filter,
+        protocol_filter,
+        workload_filter,
+      )
+      if code != 0 {
+        println("scan failed backend=\{backend} connections=\{connections_value} exit=\{code}")
+      }
+    }
+  }
+  println("scan root=\{result_root}")
+}

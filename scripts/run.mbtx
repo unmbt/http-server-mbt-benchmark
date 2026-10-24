@@ -485,6 +485,7 @@ async fn load_args(
   port : String,
   requests : Int,
   connections : Int,
+  duration : String,
   small_count : Int,
   output : String,
 ) -> Array[String] {
@@ -506,19 +507,34 @@ async fn load_args(
     ignore(output)
     args
   } else if workload == "large" {
-    let args = [
-      "--no-tui", "-n", requests.to_string(), "-c", connections.to_string(),
-      "--output-format", "json", "--output", output,
-    ]
+    let args = if duration.length() > 0 {
+      [
+        "--no-tui", "-z", duration, "-c", connections.to_string(),
+        "--output-format", "json", "--output", output,
+      ]
+    } else {
+      [
+        "--no-tui", "-n", requests.to_string(), "-c", connections.to_string(),
+        "--output-format", "json", "--output", output,
+      ]
+    }
     if insecure { args.push("--insecure") }
     args.push(url(scheme, port, "/large.bin"))
     args
   } else {
-    let urls = write_urls(protocol, port, requests, small_count)
-    let args = [
-      "--no-tui", "-n", requests.to_string(), "-c", connections.to_string(),
-      "--output-format", "json", "--output", output, "--urls-from-file",
-    ]
+    let url_count = if duration.length() > 0 { small_count } else { requests }
+    let urls = write_urls(protocol, port, url_count, small_count)
+    let args = if duration.length() > 0 {
+      [
+        "--no-tui", "-z", duration, "-c", connections.to_string(),
+        "--output-format", "json", "--output", output, "--urls-from-file",
+      ]
+    } else {
+      [
+        "--no-tui", "-n", requests.to_string(), "-c", connections.to_string(),
+        "--output-format", "json", "--output", output, "--urls-from-file",
+      ]
+    }
     if insecure { args.push("--insecure") }
     args.push(urls)
     args
@@ -589,6 +605,7 @@ async fn run_case(
   port : String,
   requests : Int,
   connections : Int,
+  duration : String,
   small_count : Int,
   cert : String,
   key : String,
@@ -614,6 +631,7 @@ async fn run_case(
     port,
     requests,
     connections,
+    duration,
     small_count,
     output,
   )
@@ -658,7 +676,7 @@ async fn run_case(
     @fs.write_file(
       "\{result_dir}/index.csv",
       "\{platform},\{io_backend},\{target.name},\{protocol},\{workload},\{requests},\{connections},\{exit_code},\{output}," +
-        resource_summary(windows, process.pid, samples.val, source, resources) + "\n",
+        resource_summary(windows, process.pid, samples.val, source, resources) + ",\{duration}\n",
       create_mode=@fs.CreateMode::OpenOrCreate,
       append=true,
     )
@@ -682,6 +700,7 @@ async fn main {
   let port = arg_value(args, "--port", "18080")
   let requests = positive(arg_value(args, "--requests", "12"), 12)
   let connections = positive(arg_value(args, "--connections", "4"), 4)
+  let duration = arg_value(args, "--duration", "")
   let small_count = positive(arg_value(args, "--small-count", "2048"), 2048)
   let target_filter = arg_value(args, "--target", "all")
   let protocol_filter = arg_value(args, "--protocol", "all")
@@ -701,7 +720,7 @@ async fn main {
   }
   @fs.write_file(
     result_dir + "/index.csv",
-    "platform,io_backend,target,protocol,workload,requests,connections,exit_code,output,pid,resource_samples,cpu_avg_percent,cpu_peak_percent,working_set_avg_bytes,working_set_peak_bytes,private_bytes_avg_bytes,private_bytes_peak_bytes,private_bytes_supported,resource_source,resources\n",
+    "platform,io_backend,target,protocol,workload,requests,connections,exit_code,output,pid,resource_samples,cpu_avg_percent,cpu_peak_percent,working_set_avg_bytes,working_set_peak_bytes,private_bytes_avg_bytes,private_bytes_peak_bytes,private_bytes_supported,resource_source,resources,duration\n",
     append=false,
   )
   let targets = target_list(project, windows, port, root, cert, key, io_backend)
@@ -729,6 +748,7 @@ async fn main {
                   port,
                   if workload == "large" { requests } else { small_count },
                   connections,
+                  duration,
                   small_count,
                   cert,
                   key,

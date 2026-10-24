@@ -1,0 +1,2 @@
+platform,io_backend,target,protocol,workload,requests,connections,exit_code,output,pid,resource_samples,cpu_avg_percent,cpu_peak_percent,working_set_avg_bytes,working_set_peak_bytes,private_bytes_avg_bytes,private_bytes_peak_bytes,private_bytes_supported,resource_source,resources,duration
+linux,epoll,cli-full,http,large,4,100,0,records/linux-20261024-large-concurrency/epoll-c100/linux-epoll-cli-full-http-large.json,842,42,57.85,65.80,3590428,3670016,,,false,linux-ps:%cpu+rss,records/linux-20261024-large-concurrency/epoll-c100/resources/linux-epoll-cli-full-http-large.csv,10s

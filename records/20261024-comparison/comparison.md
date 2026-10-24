@@ -1,82 +1,271 @@
 # http-server-mbt benchmark comparison
 
-本报告合并 Windows `oha` 基线与 WSL Linux 的 `platform`、`epoll`、`io_uring` 记录。大文件看请求/s 与 bytes/s（HTML 图表将 bytes/s 换算为 MiB/s），小文件看请求/s；CPU 和 RSS 只采样 server 进程。Linux private bytes 不可用，Thin HTTPS 是设计上的 unsupported。
+本报告合并 Windows `oha` 基线与 WSL Linux 的 `platform`、`epoll`、`io_uring` 记录。大文件看请求/s 与 bytes/s（HTML 图表将 bytes/s 换算为 MiB/s），小文件看请求/s；CPU 和 RSS 只采样 server 进程。Linux private bytes 不可用，Thin HTTPS 是设计上的 unsupported。并发扫描行的 `duration` 表示 `oha -z` 窗口；大文件在窗口内没有完成响应时，JSON 会把 `successRate` 和 `bytes/s` 留空或置零，这表示该并发点未达到可比较的完成吞吐。
 
-| 平台 | backend | target | 协议 | 负载 | 请求/s | bytes/s | 成功率 | CPU 平均% | CPU 峰值% | RSS 平均 bytes | RSS 峰值 bytes |
-|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|
-| windows | platform | cli-full | http | large | 12.668005463710758 | 850135455.8154222 | 1 | 0.00 | 0.00 | 10235904 | 10235904 |
-| windows | platform | cli-full | http | small-files | 1060.4226001531088 | 1085872.7425567834 | 1 | 128.67 | 251.33 | 10382336 | 10412032 |
-| windows | platform | cli-full | https | large | 0.7003130924758186 | 46997216.080379136 | 1 | 90.24 | 123.26 | 11619328 | 11882496 |
-| windows | platform | cli-full | https | small-files | 781.0323248990741 | 799777.1006966518 | 1 | 144.27 | 203.95 | 11343872 | 11427840 |
-| windows | platform | cli-thin | http | large | 11.231058819301248 | 753703598.880488 | 1 | 0.00 | 0.00 | 9994240 | 9994240 |
-| windows | platform | cli-thin | http | small-files | 904.1229285795422 | 925821.8788654512 | 1 | 118.63 | 239.30 | 10183680 | 10199040 |
-| windows | platform | cli-thin | https | unsupported | — | — | — | — | — | — | — |
-| windows | platform | napi | http | large | 10.093646327212294 | 677373138.6369894 | 1 | 0.00 | 0.00 | 40128512 | 40128512 |
-| windows | platform | napi | http | small-files | 939.8850788562663 | 962442.3207488167 | 1 | 110.15 | 233.77 | 40446976 | 40488960 |
-| windows | platform | napi | https | large | 0.6322916765297582 | 42432376.12856753 | 1 | 94.64 | 117.71 | 45212160 | 45326336 |
-| windows | platform | napi | https | small-files | 714.1597798602479 | 731299.6145768939 | 1 | 137.46 | 216.84 | 41308160 | 41476096 |
-| windows | platform | wasmgc | http | large | 2.2457991204552323 | 150713027.7459498 | 1 | 70.54 | 130.56 | 63905792 | 66957312 |
-| windows | platform | wasmgc | http | small-files | 512.2967735209007 | 524591.8960854023 | 1 | 119.38 | 173.80 | 95388330 | 122515456 |
-| windows | platform | wasmgc | https | large | 1.7679523628771727 | 118645274.67880283 | 1 | 59.49 | 127.36 | 69543936 | 72171520 |
-| windows | platform | wasmgc | https | small-files | 502.41073745947966 | 514468.5951585072 | 1 | 136.82 | 192.28 | 98888362 | 125833216 |
-| windows | platform | original | http | large | 4.693706326529415 | 314989299.5230021 | 1 | 51.06 | 51.06 | 65538048 | 68689920 |
-| windows | platform | original | http | small-files | 772.4236023837867 | 790961.7688409976 | 1 | 87.24 | 132.36 | 81330176 | 91156480 |
-| windows | platform | original | https | large | 2.66624024597666 | 178928354.05857423 | 1 | 54.36 | 108.72 | 93230421 | 102821888 |
-| windows | platform | original | https | small-files | 872.9931016068061 | 893944.9360453695 | 1 | 79.70 | 124.47 | 91505664 | 106008576 |
-| linux | platform | cli-full | http | large | 1.3235650876830767 | 88822949.46447167 | 1 | 52.60 | 59.10 | 1966080 | 1966080 |
-| linux | platform | cli-full | http | small-files | 283.72346808008587 | 290532.8313140079 | 1 | 67.20 | 76.00 | 2266280 | 2490368 |
-| linux | platform | cli-full | https | large | 0.4893069645027272 | 32836834.535066348 | 1 | 88.09 | 95.80 | 3019111 | 3289088 |
-| linux | platform | cli-full | https | small-files | 303.5953493902945 | 310881.63777566154 | 1 | 72.23 | 79.50 | 3109565 | 3145728 |
-| linux | platform | cli-thin | http | large | 1.5026557836891656 | 100841522.62640963 | 1 | 56.73 | 67.50 | 1310720 | 1310720 |
-| linux | platform | cli-thin | http | small-files | 338.18197591080445 | 346298.34333266376 | 1 | 68.22 | 74.70 | 1557744 | 1703936 |
-| linux | platform | cli-thin | https | unsupported | — | — | — | — | — | — | — |
-| linux | platform | napi | http | large | 1.4994020712534044 | 100623169.68106303 | 1 | 59.30 | 67.80 | 50710682 | 50720768 |
-| linux | platform | napi | http | small-files | 343.5871070490932 | 351833.19761827146 | 1 | 69.00 | 75.00 | 50973768 | 50978816 |
-| linux | platform | napi | https | large | 0.7434248729403814 | 49890398.692373335 | 1 | 89.68 | 100.00 | 52261037 | 52420608 |
-| linux | platform | napi | https | small-files | 278.00762188383925 | 284679.8048090514 | 1 | 72.30 | 78.90 | 51891953 | 51900416 |
-| linux | platform | wasmgc | http | large | 1.358037031429765 | 91136322.44918382 | 1 | 88.99 | 102.00 | 80828997 | 89395200 |
-| linux | platform | wasmgc | http | small-files | 115.7010242171203 | 118477.8487983312 | 1 | 92.99 | 96.10 | 100005033 | 113504256 |
-| linux | platform | wasmgc | https | large | 1.3432777763227095 | 90145845.60546313 | 1 | 93.30 | 107.00 | 84424994 | 91021312 |
-| linux | platform | wasmgc | https | small-files | 128.59970493568798 | 131686.0978541445 | 1 | 100.39 | 108.00 | 100367855 | 117350400 |
-| linux | platform | original | http | large | 1.9774199601205806 | 132702407.17461747 | 1 | 26.36 | 35.40 | 94710167 | 104210432 |
-| linux | platform | original | http | small-files | 154.43509274520693 | 158141.5349710919 | 1 | 24.25 | 28.00 | 87413709 | 101539840 |
-| linux | platform | original | https | large | 2.2685100854110436 | 152237134.8044781 | 1 | 30.55 | 41.20 | 99592417 | 106803200 |
-| linux | platform | original | https | small-files | 133.38339809710388 | 136584.59965143437 | 1 | 24.66 | 28.70 | 89530025 | 103477248 |
-| linux | epoll | cli-full | http | large | 1.3649815083958772 | 91602358.40945378 | 1 | 56.44 | 66.30 | 2228224 | 2228224 |
-| linux | epoll | cli-full | http | small-files | 258.6634887243498 | 264871.4124537342 | 1 | 61.98 | 69.00 | 2001833 | 2097152 |
-| linux | epoll | cli-full | https | large | 0.6441785570752494 | 43230091.17847915 | 1 | 94.33 | 105.00 | 3205195 | 3465216 |
-| linux | epoll | cli-full | https | small-files | 286.3346332524423 | 293206.6644505009 | 1 | 74.14 | 80.50 | 3241023 | 3276800 |
-| linux | epoll | cli-thin | http | large | 1.5322946131099928 | 102830550.79913113 | 1 | 57.20 | 67.50 | 1431706 | 1441792 |
-| linux | epoll | cli-thin | http | small-files | 328.019777370754 | 335892.2520276521 | 1 | 68.92 | 76.30 | 1509756 | 1703936 |
-| linux | epoll | cli-thin | https | unsupported | — | — | — | — | — | — | — |
-| linux | epoll | napi | http | large | 1.5169362107143172 | 101799865.86150245 | 1 | 60.32 | 68.70 | 50847744 | 50847744 |
-| linux | epoll | napi | http | small-files | 322.49887431397866 | 330238.84729751415 | 1 | 69.47 | 76.10 | 50720768 | 50720768 |
-| linux | epoll | napi | https | large | 0.6925277332729158 | 46474749.46844038 | 1 | 90.40 | 99.40 | 52771873 | 52813824 |
-| linux | epoll | napi | https | small-files | 292.45731957989653 | 299476.29524981405 | 1 | 74.40 | 81.30 | 52014278 | 52027392 |
-| linux | epoll | wasmgc | http | large | 1.3371224982570515 | 89732771.88687271 | 1 | 92.85 | 106.00 | 81706419 | 89100288 |
-| linux | epoll | wasmgc | http | small-files | 117.56968458509384 | 120391.35701513609 | 1 | 94.04 | 97.60 | 99388019 | 113909760 |
-| linux | epoll | wasmgc | https | large | 1.2326813319155074 | 82723843.85885665 | 1 | 95.92 | 109.00 | 84721934 | 91467776 |
-| linux | epoll | wasmgc | https | small-files | 108.91819460305007 | 111532.23127352327 | 1 | 93.77 | 96.30 | 101431493 | 115924992 |
-| linux | epoll | original | http | large | 2.4405716367657866 | 163783990.05397257 | 1 | 27.15 | 34.50 | 99460435 | 105840640 |
-| linux | epoll | original | http | small-files | 155.3325382559494 | 159060.5191740922 | 1 | 24.62 | 28.00 | 87539546 | 101900288 |
-| linux | epoll | original | https | large | 1.7322817369227967 | 116251459.49283575 | 1 | 32.11 | 43.50 | 99249800 | 106778624 |
-| linux | epoll | original | https | small-files | 152.18069708830686 | 155833.03381842622 | 1 | 25.04 | 28.60 | 89655247 | 103768064 |
-| linux | io_uring | cli-full | http | large | 1.0217078715934058 | 68565654.60249133 | 1 | 138.31 | 161.00 | 2089866 | 2097152 |
-| linux | io_uring | cli-full | http | small-files | 299.829606761277 | 307025.5173235476 | 1 | 75.31 | 84.60 | 2106198 | 2228224 |
-| linux | io_uring | cli-full | https | large | 0.641740950891751 | 43066506.196625195 | 1 | 127.16 | 143.00 | 2773598 | 3354624 |
-| linux | io_uring | cli-full | https | small-files | 260.09887518784717 | 266341.2481923555 | 1 | 77.56 | 83.80 | 3247999 | 3276800 |
-| linux | io_uring | cli-thin | http | large | 1.0849740721508219 | 72811377.45149569 | 1 | 136.12 | 155.00 | 1387819 | 1441792 |
-| linux | io_uring | cli-thin | http | small-files | 319.6525756090563 | 327324.2374236737 | 1 | 75.12 | 83.60 | 1393240 | 1572864 |
-| linux | io_uring | cli-thin | https | unsupported | — | — | — | — | — | — | — |
-| linux | io_uring | napi | http | large | 1.796895611445532 | 120587623.21069504 | 1 | 56.20 | 65.00 | 50982912 | 50982912 |
-| linux | io_uring | napi | http | small-files | 341.5143123543936 | 349710.65585089906 | 1 | 69.09 | 75.00 | 50851840 | 50851840 |
-| linux | io_uring | napi | https | large | 0.7920492706541414 | 53153526.78562797 | 1 | 89.19 | 99.70 | 52766155 | 52813824 |
-| linux | io_uring | napi | https | small-files | 301.5001028381813 | 308736.10530629766 | 1 | 74.36 | 81.30 | 52026538 | 52035584 |
-| linux | io_uring | wasmgc | http | large | 1.2833642838233676 | 86125119.18555978 | 1 | 94.04 | 107.00 | 82024581 | 89845760 |
-| linux | io_uring | wasmgc | http | small-files | 121.23098866009722 | 124140.53238793956 | 1 | 95.41 | 98.10 | 98727739 | 113041408 |
-| linux | io_uring | wasmgc | https | large | 1.180089613479856 | 79194473.37883222 | 1 | 96.02 | 109.00 | 84579069 | 91172864 |
-| linux | io_uring | wasmgc | https | small-files | 115.26636910019369 | 118032.76195859833 | 1 | 92.78 | 95.70 | 100606674 | 117145600 |
-| linux | io_uring | original | http | large | 2.683110726078163 | 180060512.8133207 | 1 | 26.12 | 33.80 | 95792126 | 103710720 |
-| linux | io_uring | original | http | small-files | 154.54638662041992 | 158255.49989931 | 1 | 23.42 | 26.90 | 87412874 | 102137856 |
-| linux | io_uring | original | https | large | 2.5554371194212253 | 171492482.10779077 | 1 | 28.67 | 37.60 | 97618146 | 106180608 |
-| linux | io_uring | original | https | small-files | 148.2457229811408 | 151803.62033268818 | 1 | 25.07 | 28.40 | 89511116 | 103075840 |
+| 平台 | backend | target | 协议 | 负载 | 并发 | 时长 | 请求/s | bytes/s | 成功率 | CPU 平均% | CPU 峰值% | RSS 平均 bytes | RSS 峰值 bytes |
+|---|---|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|
+| windows | platform | cli-full | http | large | 4 | — | 12.668005463710758 | 850135455.8154222 | 1 | 0.00 | 0.00 | 10235904 | 10235904 |
+| windows | platform | cli-full | http | small-files | 4 | — | 1060.4226001531088 | 1085872.7425567834 | 1 | 128.67 | 251.33 | 10382336 | 10412032 |
+| windows | platform | cli-full | https | large | 4 | — | 0.7003130924758186 | 46997216.080379136 | 1 | 90.24 | 123.26 | 11619328 | 11882496 |
+| windows | platform | cli-full | https | small-files | 4 | — | 781.0323248990741 | 799777.1006966518 | 1 | 144.27 | 203.95 | 11343872 | 11427840 |
+| windows | platform | cli-thin | http | large | 4 | — | 11.231058819301248 | 753703598.880488 | 1 | 0.00 | 0.00 | 9994240 | 9994240 |
+| windows | platform | cli-thin | http | small-files | 4 | — | 904.1229285795422 | 925821.8788654512 | 1 | 118.63 | 239.30 | 10183680 | 10199040 |
+| windows | platform | cli-thin | https | unsupported | 0 | — | — | — | — | — | — | — | — |
+| windows | platform | napi | http | large | 4 | — | 10.093646327212294 | 677373138.6369894 | 1 | 0.00 | 0.00 | 40128512 | 40128512 |
+| windows | platform | napi | http | small-files | 4 | — | 939.8850788562663 | 962442.3207488167 | 1 | 110.15 | 233.77 | 40446976 | 40488960 |
+| windows | platform | napi | https | large | 4 | — | 0.6322916765297582 | 42432376.12856753 | 1 | 94.64 | 117.71 | 45212160 | 45326336 |
+| windows | platform | napi | https | small-files | 4 | — | 714.1597798602479 | 731299.6145768939 | 1 | 137.46 | 216.84 | 41308160 | 41476096 |
+| windows | platform | wasmgc | http | large | 4 | — | 2.2457991204552323 | 150713027.7459498 | 1 | 70.54 | 130.56 | 63905792 | 66957312 |
+| windows | platform | wasmgc | http | small-files | 4 | — | 512.2967735209007 | 524591.8960854023 | 1 | 119.38 | 173.80 | 95388330 | 122515456 |
+| windows | platform | wasmgc | https | large | 4 | — | 1.7679523628771727 | 118645274.67880283 | 1 | 59.49 | 127.36 | 69543936 | 72171520 |
+| windows | platform | wasmgc | https | small-files | 4 | — | 502.41073745947966 | 514468.5951585072 | 1 | 136.82 | 192.28 | 98888362 | 125833216 |
+| windows | platform | original | http | large | 4 | — | 4.693706326529415 | 314989299.5230021 | 1 | 51.06 | 51.06 | 65538048 | 68689920 |
+| windows | platform | original | http | small-files | 4 | — | 772.4236023837867 | 790961.7688409976 | 1 | 87.24 | 132.36 | 81330176 | 91156480 |
+| windows | platform | original | https | large | 4 | — | 2.66624024597666 | 178928354.05857423 | 1 | 54.36 | 108.72 | 93230421 | 102821888 |
+| windows | platform | original | https | small-files | 4 | — | 872.9931016068061 | 893944.9360453695 | 1 | 79.70 | 124.47 | 91505664 | 106008576 |
+| linux | platform | cli-full | http | large | 4 | — | 1.3235650876830767 | 88822949.46447167 | 1 | 52.60 | 59.10 | 1966080 | 1966080 |
+| linux | platform | cli-full | http | small-files | 4 | — | 283.72346808008587 | 290532.8313140079 | 1 | 67.20 | 76.00 | 2266280 | 2490368 |
+| linux | platform | cli-full | https | large | 4 | — | 0.4893069645027272 | 32836834.535066348 | 1 | 88.09 | 95.80 | 3019111 | 3289088 |
+| linux | platform | cli-full | https | small-files | 4 | — | 303.5953493902945 | 310881.63777566154 | 1 | 72.23 | 79.50 | 3109565 | 3145728 |
+| linux | platform | cli-thin | http | large | 4 | — | 1.5026557836891656 | 100841522.62640963 | 1 | 56.73 | 67.50 | 1310720 | 1310720 |
+| linux | platform | cli-thin | http | small-files | 4 | — | 338.18197591080445 | 346298.34333266376 | 1 | 68.22 | 74.70 | 1557744 | 1703936 |
+| linux | platform | cli-thin | https | unsupported | 0 | — | — | — | — | — | — | — | — |
+| linux | platform | napi | http | large | 4 | — | 1.4994020712534044 | 100623169.68106303 | 1 | 59.30 | 67.80 | 50710682 | 50720768 |
+| linux | platform | napi | http | small-files | 4 | — | 343.5871070490932 | 351833.19761827146 | 1 | 69.00 | 75.00 | 50973768 | 50978816 |
+| linux | platform | napi | https | large | 4 | — | 0.7434248729403814 | 49890398.692373335 | 1 | 89.68 | 100.00 | 52261037 | 52420608 |
+| linux | platform | napi | https | small-files | 4 | — | 278.00762188383925 | 284679.8048090514 | 1 | 72.30 | 78.90 | 51891953 | 51900416 |
+| linux | platform | wasmgc | http | large | 4 | — | 1.358037031429765 | 91136322.44918382 | 1 | 88.99 | 102.00 | 80828997 | 89395200 |
+| linux | platform | wasmgc | http | small-files | 4 | — | 115.7010242171203 | 118477.8487983312 | 1 | 92.99 | 96.10 | 100005033 | 113504256 |
+| linux | platform | wasmgc | https | large | 4 | — | 1.3432777763227095 | 90145845.60546313 | 1 | 93.30 | 107.00 | 84424994 | 91021312 |
+| linux | platform | wasmgc | https | small-files | 4 | — | 128.59970493568798 | 131686.0978541445 | 1 | 100.39 | 108.00 | 100367855 | 117350400 |
+| linux | platform | original | http | large | 4 | — | 1.9774199601205806 | 132702407.17461747 | 1 | 26.36 | 35.40 | 94710167 | 104210432 |
+| linux | platform | original | http | small-files | 4 | — | 154.43509274520693 | 158141.5349710919 | 1 | 24.25 | 28.00 | 87413709 | 101539840 |
+| linux | platform | original | https | large | 4 | — | 2.2685100854110436 | 152237134.8044781 | 1 | 30.55 | 41.20 | 99592417 | 106803200 |
+| linux | platform | original | https | small-files | 4 | — | 133.38339809710388 | 136584.59965143437 | 1 | 24.66 | 28.70 | 89530025 | 103477248 |
+| linux | epoll | cli-full | http | large | 4 | — | 1.3649815083958772 | 91602358.40945378 | 1 | 56.44 | 66.30 | 2228224 | 2228224 |
+| linux | epoll | cli-full | http | small-files | 4 | — | 258.6634887243498 | 264871.4124537342 | 1 | 61.98 | 69.00 | 2001833 | 2097152 |
+| linux | epoll | cli-full | https | large | 4 | — | 0.6441785570752494 | 43230091.17847915 | 1 | 94.33 | 105.00 | 3205195 | 3465216 |
+| linux | epoll | cli-full | https | small-files | 4 | — | 286.3346332524423 | 293206.6644505009 | 1 | 74.14 | 80.50 | 3241023 | 3276800 |
+| linux | epoll | cli-thin | http | large | 4 | — | 1.5322946131099928 | 102830550.79913113 | 1 | 57.20 | 67.50 | 1431706 | 1441792 |
+| linux | epoll | cli-thin | http | small-files | 4 | — | 328.019777370754 | 335892.2520276521 | 1 | 68.92 | 76.30 | 1509756 | 1703936 |
+| linux | epoll | cli-thin | https | unsupported | 0 | — | — | — | — | — | — | — | — |
+| linux | epoll | napi | http | large | 4 | — | 1.5169362107143172 | 101799865.86150245 | 1 | 60.32 | 68.70 | 50847744 | 50847744 |
+| linux | epoll | napi | http | small-files | 4 | — | 322.49887431397866 | 330238.84729751415 | 1 | 69.47 | 76.10 | 50720768 | 50720768 |
+| linux | epoll | napi | https | large | 4 | — | 0.6925277332729158 | 46474749.46844038 | 1 | 90.40 | 99.40 | 52771873 | 52813824 |
+| linux | epoll | napi | https | small-files | 4 | — | 292.45731957989653 | 299476.29524981405 | 1 | 74.40 | 81.30 | 52014278 | 52027392 |
+| linux | epoll | wasmgc | http | large | 4 | — | 1.3371224982570515 | 89732771.88687271 | 1 | 92.85 | 106.00 | 81706419 | 89100288 |
+| linux | epoll | wasmgc | http | small-files | 4 | — | 117.56968458509384 | 120391.35701513609 | 1 | 94.04 | 97.60 | 99388019 | 113909760 |
+| linux | epoll | wasmgc | https | large | 4 | — | 1.2326813319155074 | 82723843.85885665 | 1 | 95.92 | 109.00 | 84721934 | 91467776 |
+| linux | epoll | wasmgc | https | small-files | 4 | — | 108.91819460305007 | 111532.23127352327 | 1 | 93.77 | 96.30 | 101431493 | 115924992 |
+| linux | epoll | original | http | large | 4 | — | 2.4405716367657866 | 163783990.05397257 | 1 | 27.15 | 34.50 | 99460435 | 105840640 |
+| linux | epoll | original | http | small-files | 4 | — | 155.3325382559494 | 159060.5191740922 | 1 | 24.62 | 28.00 | 87539546 | 101900288 |
+| linux | epoll | original | https | large | 4 | — | 1.7322817369227967 | 116251459.49283575 | 1 | 32.11 | 43.50 | 99249800 | 106778624 |
+| linux | epoll | original | https | small-files | 4 | — | 152.18069708830686 | 155833.03381842622 | 1 | 25.04 | 28.60 | 89655247 | 103768064 |
+| linux | io_uring | cli-full | http | large | 4 | — | 1.0217078715934058 | 68565654.60249133 | 1 | 138.31 | 161.00 | 2089866 | 2097152 |
+| linux | io_uring | cli-full | http | small-files | 4 | — | 299.829606761277 | 307025.5173235476 | 1 | 75.31 | 84.60 | 2106198 | 2228224 |
+| linux | io_uring | cli-full | https | large | 4 | — | 0.641740950891751 | 43066506.196625195 | 1 | 127.16 | 143.00 | 2773598 | 3354624 |
+| linux | io_uring | cli-full | https | small-files | 4 | — | 260.09887518784717 | 266341.2481923555 | 1 | 77.56 | 83.80 | 3247999 | 3276800 |
+| linux | io_uring | cli-thin | http | large | 4 | — | 1.0849740721508219 | 72811377.45149569 | 1 | 136.12 | 155.00 | 1387819 | 1441792 |
+| linux | io_uring | cli-thin | http | small-files | 4 | — | 319.6525756090563 | 327324.2374236737 | 1 | 75.12 | 83.60 | 1393240 | 1572864 |
+| linux | io_uring | cli-thin | https | unsupported | 0 | — | — | — | — | — | — | — | — |
+| linux | io_uring | napi | http | large | 4 | — | 1.796895611445532 | 120587623.21069504 | 1 | 56.20 | 65.00 | 50982912 | 50982912 |
+| linux | io_uring | napi | http | small-files | 4 | — | 341.5143123543936 | 349710.65585089906 | 1 | 69.09 | 75.00 | 50851840 | 50851840 |
+| linux | io_uring | napi | https | large | 4 | — | 0.7920492706541414 | 53153526.78562797 | 1 | 89.19 | 99.70 | 52766155 | 52813824 |
+| linux | io_uring | napi | https | small-files | 4 | — | 301.5001028381813 | 308736.10530629766 | 1 | 74.36 | 81.30 | 52026538 | 52035584 |
+| linux | io_uring | wasmgc | http | large | 4 | — | 1.2833642838233676 | 86125119.18555978 | 1 | 94.04 | 107.00 | 82024581 | 89845760 |
+| linux | io_uring | wasmgc | http | small-files | 4 | — | 121.23098866009722 | 124140.53238793956 | 1 | 95.41 | 98.10 | 98727739 | 113041408 |
+| linux | io_uring | wasmgc | https | large | 4 | — | 1.180089613479856 | 79194473.37883222 | 1 | 96.02 | 109.00 | 84579069 | 91172864 |
+| linux | io_uring | wasmgc | https | small-files | 4 | — | 115.26636910019369 | 118032.76195859833 | 1 | 92.78 | 95.70 | 100606674 | 117145600 |
+| linux | io_uring | original | http | large | 4 | — | 2.683110726078163 | 180060512.8133207 | 1 | 26.12 | 33.80 | 95792126 | 103710720 |
+| linux | io_uring | original | http | small-files | 4 | — | 154.54638662041992 | 158255.49989931 | 1 | 23.42 | 26.90 | 87412874 | 102137856 |
+| linux | io_uring | original | https | large | 4 | — | 2.5554371194212253 | 171492482.10779077 | 1 | 28.67 | 37.60 | 97618146 | 106180608 |
+| linux | io_uring | original | https | small-files | 4 | — | 148.2457229811408 | 151803.62033268818 | 1 | 25.07 | 28.40 | 89511116 | 103075840 |
+| linux | epoll | cli-full | http | small-files | 4 | 2s | 119.20996394586916 | 120027.97374030943 | 1 | 24.17 | 33.60 | 2085233 | 2097152 |
+| linux | epoll | cli-full | https | small-files | 4 | 2s | 102.87623227972631 | 103299.72278930499 | 1 | 39.86 | 45.80 | 3177006 | 3276800 |
+| linux | epoll | cli-thin | http | small-files | 4 | 2s | 197.27155234197636 | 199960.4385136452 | 1 | 38.25 | 51.30 | 1394130 | 1441792 |
+| linux | epoll | cli-thin | https | unsupported | 0 | — | — | — | — | — | — | — | — |
+| linux | epoll | napi | http | small-files | 4 | 2s | 136.89046408357333 | 138129.47266359982 | 1 | 32.17 | 37.40 | 51103058 | 51113984 |
+| linux | epoll | napi | https | small-files | 4 | 2s | 135.42135526672104 | 136624.65646038254 | 1 | 42.94 | 50.00 | 52085478 | 52109312 |
+| linux | epoll | wasmgc | http | small-files | 4 | 2s | 42.93906463663584 | 41924.504411733 | 1 | 65.30 | 77.90 | 74454479 | 77283328 |
+| linux | epoll | wasmgc | https | small-files | 4 | 2s | 67.9591600107507 | 67543.40985539081 | 1 | 79.04 | 89.30 | 77856393 | 80236544 |
+| linux | epoll | original | http | small-files | 4 | 2s | 122.3984581778964 | 123289.71878764892 | 1 | 14.43 | 15.90 | 72547667 | 75198464 |
+| linux | epoll | original | https | small-files | 4 | 2s | 74.94533936618667 | 74697.52011068248 | 1 | 13.32 | 14.50 | 71447270 | 73535488 |
+| linux | epoll | cli-full | http | small-files | 100 | 2s | 244.8801546997012 | 199686.54961157872 | 1 | 39.56 | 47.80 | 3248809 | 3538944 |
+| linux | epoll | cli-full | https | small-files | 100 | 2s | 49.80051544479696 | 0 | — | 71.90 | 89.20 | 10104457 | 12713984 |
+| linux | epoll | cli-thin | http | small-files | 100 | 2s | 275.49183464910215 | 230997.90703562976 | 1 | 29.50 | 46.90 | 2585692 | 2883584 |
+| linux | epoll | cli-thin | https | unsupported | 0 | — | — | — | — | — | — | — | — |
+| linux | epoll | napi | http | small-files | 100 | 2s | 296.76713208348417 | 252815.67043777552 | 1 | 42.75 | 50.00 | 52147120 | 52424704 |
+| linux | epoll | napi | https | small-files | 100 | 2s | 49.856226483674874 | 0 | — | 64.21 | 85.40 | 55772996 | 58585088 |
+| linux | epoll | wasmgc | http | small-files | 100 | 2s | 99.77355414106853 | 51084.05972022709 | 1 | 54.24 | 64.00 | 80647848 | 87126016 |
+| linux | epoll | wasmgc | https | small-files | 100 | 2s | 99.80281249734931 | 51099.039998642846 | 1 | 66.30 | 78.90 | 84805071 | 94146560 |
+| linux | epoll | original | http | small-files | 100 | 2s | 150.11806683716864 | 66901.78723523306 | 0.6517412935323383 | 11.86 | 13.40 | 71613778 | 74076160 |
+| linux | epoll | original | https | small-files | 100 | 2s | 144.1165424860464 | 32170.402729618774 | 0.3333333333333333 | 18.68 | 22.00 | 79405054 | 82350080 |
+| linux | epoll | cli-full | http | small-files | 200 | 2s | 453.0187096043547 | 361712.4893320268 | 1 | 53.20 | 68.80 | 4747262 | 5242880 |
+| linux | epoll | cli-full | https | small-files | 200 | 2s | 99.66362281504637 | 0 | — | 67.56 | 88.00 | 16229093 | 18481152 |
+| linux | epoll | cli-thin | http | small-files | 200 | 2s | 376.40093486545646 | 283332.68781819363 | 1 | 48.16 | 61.70 | 3828269 | 4325376 |
+| linux | epoll | cli-thin | https | unsupported | 0 | — | — | — | — | — | — | — | — |
+| linux | epoll | napi | http | small-files | 200 | 2s | 448.92268655986084 | 357541.97969567584 | 1 | 47.86 | 61.50 | 53672121 | 54132736 |
+| linux | epoll | napi | https | small-files | 200 | 2s | 99.76801726125176 | 0 | — | 67.26 | 86.20 | 58467121 | 61206528 |
+| linux | epoll | wasmgc | http | small-files | 200 | 2s | 101.67915072812335 | 2041.5578499136923 | 1 | 77.52 | 91.40 | 81262776 | 90042368 |
+| linux | epoll | wasmgc | https | small-files | 200 | 2s | 99.71135427539599 | 0 | — | 86.28 | 98.70 | 89920714 | 100724736 |
+| linux | epoll | original | http | small-files | 200 | 2s | 237.72057118117374 | 110230.58032733067 | 0.779783393501805 | 16.10 | 19.30 | 72820920 | 75325440 |
+| linux | epoll | original | https | small-files | 200 | 2s | 231.49464810915632 | 115970.83612861458 | 0.8598484848484849 | 17.68 | 20.20 | 79602033 | 83771392 |
+| linux | epoll | cli-full | http | small-files | 500 | 2s | 477.0477887831098 | 138444.94507395255 | 0.9978165938864629 | 45.05 | 56.00 | 7208213 | 9043968 |
+| linux | epoll | cli-full | https | small-files | 500 | 2s | 249.1247609388829 | 0 | — | 69.23 | 89.10 | 18664650 | 21233664 |
+| linux | epoll | cli-thin | http | small-files | 500 | 2s | 669.6329119410481 | 197066.8874712105 | 0.9751184834123223 | 57.84 | 72.80 | 6184213 | 7602176 |
+| linux | epoll | cli-thin | https | unsupported | 0 | — | — | — | — | — | — | — | — |
+| linux | epoll | napi | http | small-files | 500 | 2s | 725.5357085653087 | 186897.00122648047 | 0.993717277486911 | 49.92 | 60.00 | 57375190 | 58454016 |
+| linux | epoll | napi | https | small-files | 500 | 2s | 248.9246197545001 | 0 | — | 62.82 | 83.00 | 66672229 | 68939776 |
+| linux | epoll | wasmgc | http | small-files | 500 | 2s | 1507.0418020295765 | 16353.271785659785 | 1 | 84.43 | 101.00 | 85624644 | 96374784 |
+| linux | epoll | wasmgc | https | small-files | 500 | 2s | 1071.0779465189241 | 10687.376088394081 | 1 | 79.33 | 96.70 | 99090802 | 111828992 |
+| linux | epoll | original | http | small-files | 500 | 2s | 401.7518175664695 | 89322.48847135402 | 0.5718954248366013 | 15.97 | 18.60 | 73187326 | 75845632 |
+| linux | epoll | original | https | small-files | 500 | 2s | 366.0839089153171 | 0 | 0 | 19.94 | 22.50 | 89920975 | 95621120 |
+| linux | epoll | cli-full | http | small-files | 1000 | 2s | 905.6151711822134 | 133384.6749463051 | 0.95 | 60.29 | 76.60 | 10780669 | 15073280 |
+| linux | epoll | cli-full | https | small-files | 1000 | 2s | 497.110785404235 | 0 | — | 71.90 | 90.10 | 22842273 | 25559040 |
+| linux | epoll | cli-thin | http | small-files | 1000 | 2s | 940.0388674173058 | 123839.29714783812 | 0.9291338582677166 | 60.21 | 79.50 | 9496760 | 14286848 |
+| linux | epoll | cli-thin | https | unsupported | 0 | — | — | — | — | — | — | — | — |
+| linux | epoll | napi | http | small-files | 1000 | 2s | 996.7679689182202 | 9931.37027714077 | 0.9940239043824701 | 59.08 | 69.20 | 61934248 | 66052096 |
+| linux | epoll | napi | https | small-files | 1000 | 2s | 497.67338538377845 | 0 | — | 64.43 | 84.10 | 77284964 | 80732160 |
+| linux | epoll | wasmgc | http | small-files | 1000 | 2s | 1616.0584416686975 | 14626.997973256533 | 1 | 88.03 | 103.00 | 85804370 | 95526912 |
+| linux | epoll | wasmgc | https | small-files | 1000 | 2s | 943.0716745298848 | 5803.93820970551 | 1 | 75.34 | 93.70 | 91872161 | 106856448 |
+| linux | epoll | original | http | small-files | 1000 | 2s | 644.0334793925945 | 22424.708228371514 | 0.14965986394557823 | 15.04 | 16.70 | 74875250 | 77107200 |
+| linux | epoll | original | https | small-files | 1000 | 2s | 613.7801922036222 | 0 | 0 | 19.09 | 21.60 | 90293711 | 96518144 |
+| linux | epoll | cli-full | http | small-files | 2000 | 2s | 1199.2533418173923 | 5730.563872875923 | 1 | 28.41 | 47.90 | 9562484 | 10354688 |
+| linux | epoll | cli-full | https | small-files | 2000 | 2s | 991.057482689267 | 0 | — | 52.26 | 77.10 | 18659883 | 21102592 |
+| linux | epoll | cli-thin | http | small-files | 2000 | 2s | 1308.589937317056 | 6350.022800815528 | 1 | 46.57 | 60.80 | 10248189 | 12845056 |
+| linux | epoll | cli-thin | https | unsupported | 0 | — | — | — | — | — | — | — | — |
+| linux | epoll | napi | http | small-files | 2000 | 2s | 1541.668178654154 | 10542.384125308392 | 1 | 60.13 | 73.60 | 61702886 | 66314240 |
+| linux | epoll | napi | https | small-files | 2000 | 2s | 993.6806758179675 | 0 | — | 66.80 | 85.80 | 77455357 | 80863232 |
+| linux | epoll | wasmgc | http | small-files | 2000 | 2s | 2151.888501118603 | 15077.109060165705 | 1 | 85.39 | 106.00 | 86413682 | 99569664 |
+| linux | epoll | wasmgc | https | small-files | 2000 | 2s | 1652.1773889461604 | 8593.89930387052 | 1 | 83.19 | 99.30 | 103478363 | 118484992 |
+| linux | epoll | original | http | small-files | 2000 | 2s | 1157.0293640751474 | 38088.23624559423 | 0.22522522522522523 | 16.65 | 18.50 | 74967223 | 77410304 |
+| linux | epoll | original | https | small-files | 2000 | 2s | 1144.6385920544324 | 0 | 0 | 22.55 | 27.40 | 93055333 | 97857536 |
+| linux | io_uring | cli-full | http | small-files | 4 | 2s | 185.31680720138436 | 187718.4331017193 | 1 | 44.80 | 53.70 | 2144817 | 2228224 |
+| linux | io_uring | cli-full | https | small-files | 4 | 2s | 189.35636155434477 | 191854.46658804326 | 1 | 52.51 | 64.80 | 3139025 | 3276800 |
+| linux | io_uring | cli-thin | http | small-files | 4 | 2s | 243.71847944394264 | 247522.08587723173 | 1 | 52.51 | 66.60 | 1334553 | 1441792 |
+| linux | io_uring | cli-thin | https | unsupported | 0 | — | — | — | — | — | — | — | — |
+| linux | io_uring | napi | http | small-files | 4 | 2s | 277.1963276808752 | 281803.2807016471 | 1 | 54.45 | 62.70 | 50573681 | 50585600 |
+| linux | io_uring | napi | https | small-files | 4 | 2s | 206.26228107096745 | 209166.93343587965 | 1 | 50.74 | 60.90 | 51485352 | 51507200 |
+| linux | io_uring | wasmgc | http | small-files | 4 | 2s | 59.92531771324796 | 59318.07449375372 | 1 | 68.61 | 76.80 | 76378855 | 78921728 |
+| linux | io_uring | wasmgc | https | small-files | 4 | 2s | 83.91349416625846 | 83881.52712086179 | 1 | 79.71 | 90.20 | 77702606 | 80461824 |
+| linux | io_uring | original | http | small-files | 4 | 2s | 132.37379198068908 | 133504.71373557317 | 1 | 16.28 | 18.00 | 72189019 | 74412032 |
+| linux | io_uring | original | https | small-files | 4 | 2s | 125.85883132285852 | 126833.73782580384 | 1 | 16.64 | 18.80 | 74080998 | 76591104 |
+| linux | platform | cli-full | http | small-files | 4 | 2s | 150.7343324724621 | 152307.55967760514 | 1 | 31.57 | 41.30 | 2086226 | 2097152 |
+| linux | platform | cli-full | https | small-files | 4 | 2s | 180.8075865552713 | 183101.14577477908 | 1 | 49.76 | 60.20 | 3043700 | 3145728 |
+| linux | platform | cli-thin | http | small-files | 4 | 2s | 210.6825663680551 | 213694.0290228705 | 1 | 46.69 | 57.70 | 1394127 | 1441792 |
+| linux | platform | cli-thin | https | unsupported | 0 | — | — | — | — | — | — | — | — |
+| linux | platform | napi | http | small-files | 4 | 2s | 201.7608159825865 | 204557.50056056297 | 1 | 43.53 | 49.10 | 50704753 | 50716672 |
+| linux | platform | napi | https | small-files | 4 | 2s | 97.87491732378396 | 98178.52931221692 | 1 | 33.74 | 38.00 | 51602522 | 51638272 |
+| linux | platform | wasmgc | http | small-files | 4 | 2s | 61.939542051794085 | 61380.088123584326 | 1 | 80.60 | 91.80 | 76178088 | 78295040 |
+| linux | platform | wasmgc | https | small-files | 4 | 2s | 55.93993636731346 | 55236.69145298152 | 1 | 62.97 | 72.20 | 77244972 | 80064512 |
+| linux | platform | original | http | small-files | 4 | 2s | 119.43269543626099 | 120252.23359741356 | 1 | 15.13 | 17.00 | 72046999 | 74346496 |
+| linux | platform | original | https | small-files | 4 | 2s | 92.38495375616708 | 92556.73983234071 | 1 | 14.33 | 16.00 | 72152528 | 75202560 |
+| linux | io_uring | cli-full | http | small-files | 100 | 2s | 399.20949254862603 | 357691.70532356895 | 1 | 63.00 | 82.20 | 3209774 | 3538944 |
+| linux | io_uring | cli-full | https | small-files | 100 | 2s | 49.890984805612774 | 0 | — | 70.10 | 89.50 | 8847357 | 11403264 |
+| linux | io_uring | cli-thin | http | small-files | 100 | 2s | 399.3267237629241 | 357796.74449158 | 1 | 59.31 | 79.50 | 2697402 | 3014656 |
+| linux | io_uring | cli-thin | https | unsupported | 0 | — | — | — | — | — | — | — | — |
+| linux | io_uring | napi | http | small-files | 100 | 2s | 255.02612740928552 | 210041.7144539756 | 1 | 35.53 | 42.90 | 52063139 | 52289536 |
+| linux | io_uring | napi | https | small-files | 100 | 2s | 49.89320718233713 | 0 | — | 65.59 | 83.30 | 58336049 | 60944384 |
+| linux | io_uring | wasmgc | http | small-files | 100 | 2s | 147.76173457240634 | 100190.4431608792 | 1 | 72.89 | 92.20 | 81583307 | 90587136 |
+| linux | io_uring | wasmgc | https | small-files | 100 | 2s | 99.83818895250444 | 51117.15274368227 | 1 | 75.82 | 90.20 | 86039084 | 94330880 |
+| linux | io_uring | original | http | small-files | 100 | 2s | 187.42148152116235 | 111782.95680853666 | 0.7934782608695652 | 16.84 | 19.70 | 72390468 | 75788288 |
+| linux | io_uring | original | https | small-files | 100 | 2s | 153.11693190663905 | 63329.56203836286 | 0.5990338164251208 | 17.37 | 20.00 | 78809272 | 82415616 |
+| linux | io_uring | cli-full | http | small-files | 200 | 2s | 381.53353397129547 | 288549.0737443565 | 1 | 54.92 | 72.50 | 4870143 | 5242880 |
+| linux | io_uring | cli-full | https | small-files | 200 | 2s | 99.71498973031831 | 0 | — | 70.03 | 89.10 | 10839652 | 12582912 |
+| linux | io_uring | cli-thin | http | small-files | 200 | 2s | 299.23968716463696 | 204280.9597710588 | 1 | 49.82 | 69.10 | 3918753 | 4456448 |
+| linux | io_uring | cli-thin | https | unsupported | 0 | — | — | — | — | — | — | — | — |
+| linux | io_uring | napi | http | small-files | 200 | 2s | 299.1413746618787 | 204213.84510250916 | 1 | 43.30 | 49.50 | 53392849 | 53870592 |
+| linux | io_uring | napi | https | small-files | 200 | 2s | 99.64543657548256 | 0 | — | 69.92 | 87.60 | 58454014 | 60944384 |
+| linux | io_uring | wasmgc | http | small-files | 200 | 2s | 99.83635827506951 | 0 | — | 67.76 | 76.50 | 78468645 | 83099648 |
+| linux | io_uring | wasmgc | https | small-files | 200 | 2s | 99.36750135975608 | 0 | — | 64.55 | 77.60 | 89253543 | 96739328 |
+| linux | io_uring | original | http | small-files | 200 | 2s | 230.45299113414572 | 101646.72883409455 | 0.7566539923954373 | 15.37 | 17.60 | 72737883 | 75771904 |
+| linux | io_uring | original | https | small-files | 200 | 2s | 171.96652501617848 | 15822.914116271217 | 0.21379310344827587 | 17.71 | 21.70 | 80999344 | 84262912 |
+| linux | io_uring | cli-full | http | small-files | 500 | 2s | 444.0817124764922 | 104997.16493699241 | 0.8928571428571429 | 41.05 | 55.30 | 7959385 | 9175040 |
+| linux | io_uring | cli-full | https | small-files | 500 | 2s | 248.7482233207899 | 0 | — | 69.46 | 89.00 | 18907134 | 21102592 |
+| linux | io_uring | cli-thin | http | small-files | 500 | 2s | 470.57854544769157 | 131826.72839827236 | 1 | 52.47 | 67.40 | 6204072 | 7733248 |
+| linux | io_uring | cli-thin | https | unsupported | 0 | — | — | — | — | — | — | — | — |
+| linux | io_uring | napi | http | small-files | 500 | 2s | 611.9766201707878 | 22825.53188685865 | 0.9862637362637363 | 44.90 | 53.90 | 57262392 | 58585088 |
+| linux | io_uring | napi | https | small-files | 500 | 2s | 249.09133188404326 | 0 | — | 48.11 | 70.70 | 69944932 | 72605696 |
+| linux | io_uring | wasmgc | http | small-files | 500 | 2s | 1097.5045980997668 | 11048.345024553068 | 1 | 91.14 | 104.00 | 84782419 | 92049408 |
+| linux | io_uring | wasmgc | https | small-files | 500 | 2s | 778.1729653180475 | 6878.012777964766 | 1 | 83.55 | 97.00 | 99405138 | 110100480 |
+| linux | io_uring | original | http | small-files | 500 | 2s | 389.7536962865467 | 71360.26807105917 | 0.49469964664310956 | 14.75 | 16.60 | 73735166 | 76419072 |
+| linux | io_uring | original | https | small-files | 500 | 2s | 344.2284346201076 | 14793.353971749226 | 0.1518324607329843 | 20.42 | 25.00 | 83932995 | 89333760 |
+| linux | platform | cli-full | http | small-files | 100 | 2s | 99.02849770856054 | 50702.590826782995 | 1 | 7.16 | 11.00 | 3126440 | 3670016 |
+| linux | platform | cli-full | https | small-files | 100 | 2s | 46.506146216706796 | 0 | — | 65.23 | 85.30 | 7299700 | 8781824 |
+| linux | platform | cli-thin | http | small-files | 100 | 2s | 146.17930146970536 | 98599.68501044644 | 1 | 24.85 | 33.10 | 2457599 | 2752512 |
+| linux | platform | cli-thin | https | unsupported | 0 | — | — | — | — | — | — | — | — |
+| linux | platform | napi | http | small-files | 100 | 2s | 183.22218164595904 | 137319.37620238913 | 1 | 29.63 | 37.30 | 51763042 | 52162560 |
+| linux | platform | napi | https | small-files | 100 | 2s | 49.91311935271269 | 0 | — | 65.52 | 84.90 | 58467120 | 59633664 |
+| linux | platform | wasmgc | http | small-files | 100 | 2s | 99.81844178342597 | 51107.042193114095 | 1 | 82.01 | 95.90 | 79669805 | 85741568 |
+| linux | platform | wasmgc | https | small-files | 100 | 2s | 99.8077674452829 | 51101.57693198485 | 1 | 84.79 | 97.00 | 87023986 | 96112640 |
+| linux | platform | original | http | small-files | 100 | 2s | 183.0151208369453 | 109278.47825538105 | 0.8014981273408239 | 15.30 | 17.40 | 72380786 | 75309056 |
+| linux | platform | original | https | small-files | 100 | 2s | 148.57558589011106 | 45438.20334121195 | 0.4494949494949495 | 18.09 | 21.70 | 80171347 | 83197952 |
+| linux | platform | cli-full | http | small-files | 200 | 2s | 448.93793047822635 | 357554.1206297696 | 1 | 51.66 | 69.20 | 4305640 | 4849664 |
+| linux | platform | cli-full | https | small-files | 200 | 2s | 99.70702446875389 | 0 | — | 72.14 | 90.90 | 8340943 | 11403264 |
+| linux | platform | cli-thin | http | small-files | 200 | 2s | 450.1393686818185 | 358851.3041104297 | 1 | 52.30 | 70.20 | 3867367 | 4325376 |
+| linux | platform | cli-thin | https | unsupported | 0 | — | — | — | — | — | — | — | — |
+| linux | platform | napi | http | small-files | 200 | 2s | 380.7002952831082 | 287785.50489087065 | 1 | 51.26 | 67.30 | 53716060 | 54259712 |
+| linux | platform | napi | https | small-files | 200 | 2s | 99.75773285907643 | 0 | — | 67.25 | 86.10 | 58771639 | 61333504 |
+| linux | platform | wasmgc | http | small-files | 200 | 2s | 99.60670625716823 | 0 | — | 76.11 | 91.90 | 80171826 | 90980352 |
+| linux | platform | wasmgc | https | small-files | 200 | 2s | 99.77523010319466 | 0 | — | 77.78 | 88.00 | 84674744 | 93282304 |
+| linux | platform | original | http | small-files | 200 | 2s | 244.17601254050527 | 110220.0554239982 | 0.7448275862068966 | 16.84 | 19.30 | 73617778 | 76423168 |
+| linux | platform | original | https | small-files | 200 | 2s | 162.6748607481153 | 37405.47696244088 | 0.5597014925373134 | 16.17 | 21.60 | 75157843 | 78303232 |
+| linux | platform | cli-full | http | small-files | 500 | 2s | 536.1662610175614 | 5457.744400682939 | 1 | 35.15 | 44.00 | 7743827 | 9437184 |
+| linux | platform | cli-full | https | small-files | 500 | 2s | 248.47663003447272 | 0 | — | 68.10 | 88.40 | 18898197 | 21233664 |
+| linux | platform | cli-thin | http | small-files | 500 | 2s | 484.05561941841097 | 129126.19846407318 | 0.9808917197452229 | 43.24 | 60.10 | 5920082 | 7471104 |
+| linux | platform | cli-thin | https | unsupported | 0 | — | — | — | — | — | — | — | — |
+| linux | platform | napi | http | small-files | 500 | 2s | 705.487330292191 | 141714.33183277273 | 0.9934569247546347 | 48.56 | 58.60 | 57390419 | 58712064 |
+| linux | platform | napi | https | small-files | 500 | 2s | 249.2230194485026 | 0 | — | 63.18 | 83.60 | 67014022 | 68939776 |
+| linux | platform | wasmgc | http | small-files | 500 | 2s | 914.1443061480036 | 8647.52631218874 | 1 | 77.86 | 96.30 | 83843857 | 90955776 |
+| linux | platform | wasmgc | https | small-files | 500 | 2s | 676.6424912884335 | 5557.636485884526 | 1 | 79.07 | 94.70 | 92445228 | 106045440 |
+| linux | platform | original | http | small-files | 500 | 2s | 362.72832364698155 | 59694.71840590325 | 0.5131578947368421 | 16.65 | 20.00 | 71370190 | 75083776 |
+| linux | platform | original | https | small-files | 500 | 2s | 366.3045256197512 | 0 | 0 | 18.24 | 20.50 | 89439025 | 96563200 |
+| linux | io_uring | cli-full | http | small-files | 1000 | 2s | 908.5580028617946 | 134627.12284527667 | 0.927536231884058 | 62.16 | 84.60 | 10676408 | 15597568 |
+| linux | io_uring | cli-full | https | small-files | 1000 | 2s | 497.4440033752172 | 0 | — | 65.19 | 86.80 | 18782615 | 21364736 |
+| linux | io_uring | cli-thin | http | small-files | 1000 | 2s | 872.2392360620477 | 47584.55624732337 | 0.9243027888446215 | 57.26 | 77.80 | 9939625 | 13500416 |
+| linux | io_uring | cli-thin | https | unsupported | 0 | — | — | — | — | — | — | — | — |
+| linux | io_uring | napi | http | small-files | 1000 | 2s | 1023.4908919100426 | 9997.188488423555 | 1 | 50.53 | 61.80 | 61932463 | 65925120 |
+| linux | io_uring | napi | https | small-files | 1000 | 2s | 497.63504543053403 | 0 | — | 62.69 | 83.30 | 68765284 | 71294976 |
+| linux | io_uring | wasmgc | http | small-files | 1000 | 2s | 1797.439298416359 | 16926.051871856802 | 1 | 88.17 | 109.00 | 86956216 | 98181120 |
+| linux | io_uring | wasmgc | https | small-files | 1000 | 2s | 1082.2543330925564 | 7609.569723131042 | 1 | 79.91 | 96.90 | 97828489 | 109416448 |
+| linux | io_uring | original | http | small-files | 1000 | 2s | 653.6822334424297 | 61176.293103888616 | 0.38338658146964855 | 16.99 | 18.60 | 75189525 | 77484032 |
+| linux | io_uring | original | https | small-files | 1000 | 2s | 615.2582481234288 | 0 | 0 | 19.57 | 23.20 | 90003454 | 97452032 |
+| linux | io_uring | cli-full | http | small-files | 2000 | 1s | 2583.418706009282 | 11572.570688019416 | 1 | 32.03 | 42.50 | 8437759 | 9437184 |
+| linux | platform | cli-full | http | small-files | 1000 | 2s | 889.85692581737 | 106569.32515782956 | 0.9441624365482234 | 63.22 | 82.80 | 11272189 | 16121856 |
+| linux | platform | cli-full | https | small-files | 1000 | 2s | 496.94465258557096 | 0 | — | 69.96 | 89.40 | 27930249 | 31326208 |
+| linux | platform | cli-thin | http | small-files | 1000 | 2s | 856.9582987076735 | 6835.321693513725 | 0.9972489683631361 | 58.41 | 75.40 | 10036366 | 13238272 |
+| linux | platform | cli-thin | https | unsupported | 0 | — | — | — | — | — | — | — | — |
+| linux | platform | napi | http | small-files | 1000 | 2s | 787.9519605883073 | 5525.606335608224 | 1 | 32.94 | 39.00 | 57973415 | 61599744 |
+| linux | platform | napi | https | small-files | 1000 | 2s | 491.4075770872405 | 0 | — | 67.63 | 86.20 | 78398802 | 81391616 |
+| linux | platform | wasmgc | http | small-files | 1000 | 2s | 1346.5885815559113 | 11046.001538002918 | 1 | 76.22 | 96.40 | 84628571 | 93364224 |
+| linux | platform | wasmgc | https | small-files | 1000 | 2s | 1275.055295659018 | 10123.512209247563 | 1 | 76.38 | 94.40 | 95555240 | 110768128 |
+| linux | platform | original | http | small-files | 1000 | 2s | 642.4019417958632 | 0 | 0 | 12.28 | 13.80 | 73646450 | 75575296 |
+| linux | platform | original | https | small-files | 1000 | 2s | 738.1165271195448 | 0 | 0 | 23.22 | 32.50 | 107029594 | 125816832 |
+| linux | platform | cli-full | http | small-files | 2000 | 2s | 1334.5184095116656 | 6489.890122446612 | 1 | 37.31 | 45.60 | 9376686 | 12582912 |
+| linux | platform | cli-full | https | small-files | 2000 | 2s | 1055.064185246378 | 0 | 0 | 70.96 | 90.20 | 29612186 | 32636928 |
+| linux | platform | cli-thin | http | small-files | 2000 | 2s | 1300.9081114035732 | 5984.966040375439 | 1 | 51.91 | 61.20 | 10354100 | 13500416 |
+| linux | platform | cli-thin | https | unsupported | 0 | — | — | — | — | — | — | — | — |
+| linux | platform | napi | http | small-files | 2000 | 2s | 1495.001802300878 | 9662.022535556547 | 1 | 55.04 | 80.10 | 64289336 | 66449408 |
+| linux | platform | napi | https | small-files | 2000 | 2s | 1288.122980147726 | 0 | 0 | 60.64 | 81.60 | 78758257 | 82046976 |
+| linux | platform | wasmgc | http | small-files | 2000 | 2s | 2068.388684124796 | 14004.983466874697 | 1 | 81.41 | 100.00 | 85420216 | 94552064 |
+| linux | platform | wasmgc | https | small-files | 2000 | 2s | 1278.5710329313445 | 3791.301137017182 | 1 | 75.67 | 95.50 | 101047572 | 117026816 |
+| linux | platform | original | http | small-files | 2000 | 2s | 1120.93966958301 | 25914.10062164813 | 0.1969111969111969 | 14.65 | 16.90 | 72915500 | 75526144 |
+| linux | platform | original | https | small-files | 2000 | 2s | 1110.5600458609322 | 0 | 0 | 18.85 | 22.50 | 88593499 | 94863360 |
+| linux | epoll | cli-full | http | large | 4 | 10s | 1.5997040536302856 | 80515741.33149266 | 1 | 57.51 | 63.10 | 2097152 | 2097152 |
+| linux | epoll | cli-full | http | large | 100 | 10s | 9.991418075269175 | 0 | — | 57.85 | 65.80 | 3590428 | 3670016 |
+| linux | epoll | cli-full | http | large | 500 | 10s | 302.86295975784026 | 3282.811027572796 | 0.6829652996845426 | 35.75 | 47.20 | 8763090 | 9437184 |
+| linux | epoll | cli-full | http | large | 1000 | 10s | 1109.711657929168 | 4495.22529251426 | 0.23426538879557357 | 78.69 | 90.70 | 14021645 | 16777216 |
+| linux | io_uring | cli-full | http | large | 4 | 10s | 1.1998068750060558 | 53678450.93403093 | 1 | 144.70 | 157.00 | 2206936 | 2265088 |
+| linux | platform | cli-full | http | large | 4 | 10s | 1.1997480431929703 | 53675818.84326878 | 1 | 40.50 | 49.50 | 1966080 | 1966080 |
+| linux | io_uring | cli-full | http | large | 100 | 10s | 9.99372163326524 | 0 | — | 165.87 | 185.00 | 5863070 | 7634944 |
+| linux | io_uring | cli-full | http | large | 500 | 10s | 418.19801974614126 | 3334.6025914444044 | 0.47655191108701545 | 148.20 | 174.00 | 20655532 | 24096768 |
+| linux | platform | cli-full | http | large | 100 | 10s | 9.995078521287887 | 0 | — | 59.53 | 66.20 | 3448044 | 3538944 |
+| linux | platform | cli-full | http | large | 500 | 10s | 335.75230520064383 | 3219.031462223825 | 0.5926701570680628 | 64.51 | 79.40 | 8727232 | 9437184 |
+| linux | io_uring | cli-full | http | large | 1000 | 10s | 1387.6217030616854 | 5378.019697027681 | 0.21979384639231186 | 122.09 | 142.00 | 30666059 | 35328000 |
+| linux | platform | cli-full | http | large | 1000 | 10s | 430.2125736916725 | 5586.477884674819 | 0.8897946859903382 | 81.35 | 94.10 | 15409886 | 17170432 |
+| linux | epoll | cli-full | http | small-files | 5000 | 1s | 5286.520966477901 | 9644.793857286717 | 1 | 56.50 | 72.80 | 11985349 | 13369344 |
+| linux | epoll | cli-full | http | small-files | 10000 | 1s | 9662.011722835095 | 13353.6209522501 | 1 | 50.96 | 64.60 | 13533182 | 16252928 |
+| linux | io_uring | cli-full | http | small-files | 5000 | 1s | 4999.407413382803 | 7085.038416485679 | 1 | 35.58 | 48.30 | 8221351 | 9306112 |
+| linux | platform | cli-full | http | small-files | 5000 | 1s | 5302.907511726589 | 8724.513162332785 | 1 | 16.88 | 32.80 | 7890532 | 10354688 |
+| linux | io_uring | cli-full | http | small-files | 10000 | 1s | 10033.958842406675 | 13746.411877361707 | 1 | 44.44 | 76.60 | 13051025 | 16384000 |
+| linux | platform | cli-full | http | small-files | 10000 | 1s | 9468.674598010219 | 11047.676108438965 | 1 | 62.03 | 84.20 | 14620483 | 16646144 |

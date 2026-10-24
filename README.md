@@ -20,7 +20,7 @@ Linux 的 backend 参数只对 Native CLI 和 Node-API 生效；WasmGC 使用 No
 - `data/public/small/`：2048 个、每个 1 KiB 的小文件；
 - `state/certs/server.crt` 和 `server.key`：仅供本机 HTTPS 测试的自签名证书。
 
-`run.mbtx` 使用 HTTP keep-alive、并发 4；大文件请求数默认 12，小文件 case 默认覆盖 2048 个 URL。Windows 基线记录使用 4 个大文件请求以缩短首轮耗时，具体参数写在对应记录 README。HTTPS 请求只对本地证书使用 `--insecure`。
+`run.mbtx` 使用 HTTP keep-alive、并发 4；大文件请求数默认 12，小文件 case 默认覆盖 2048 个 URL。Windows 基线记录使用 4 个大文件请求以缩短首轮耗时，具体参数写在对应记录 README。HTTPS 请求只对本地证书使用 `--insecure`。需要扫并发时传入 `--duration 5s --connections N`，脚本会改用 `oha -z 5s -c N`，避免大文件在高并发下按固定请求数无限放大。
 
 ## CPU 和内存记录
 
@@ -82,6 +82,31 @@ moon run scripts/run.mbtx -- --project-root "$HS_PROJECT_ROOT" --requests 4 --co
 ```
 
 在 Linux 上设置 `BENCH_LOAD_TOOL=oha`；`--io-backend platform|epoll|io_uring` 分别写入独立记录目录，避免不同 backend 覆盖文件。Linux 结果和环境说明见 `records/linux-20261024-*`。
+
+## Linux 并发扫描
+
+`scripts/concurrency.mbtx` 为每个 backend 和连接数建立独立目录，默认扫描 `4,100,200,500,1000,2000`，默认只跑小文件负载；每行仍保存 `requestsPerSec`、成功率、CPU 平均/峰值、RSS 平均/峰值和 `duration`。例如：
+
+```bash
+export PATH=/root/.cargo/bin:/root/.moon/bin:$PATH
+ulimit -n 65535
+moon run scripts/concurrency.mbtx -- \
+  --project-root "$HS_PROJECT_ROOT" \
+  --out records/linux-20261024-concurrency \
+  --duration 5s \
+  --connections 4,100,200,500,1000,2000 \
+  --workload small-files
+```
+
+完成后把并发目录追加到报告，并打开 `concurrency` 过滤器对应的连接数/时长：
+
+```bash
+moon run scripts/report.mbtx -- \
+  --out records/20261024-comparison \
+  --concurrency-root records/linux-20261024-concurrency,records/linux-20261024-large-concurrency,records/linux-20261024-high-concurrency
+```
+
+本机实际已用 1 秒窗口对 Full CLI HTTP 小文件做了 5000 和 10000 并发 smoke：三个 backend 都能完成且成功率为 100%。这不能替代全目标矩阵；几万连接前仍要确认 `ulimit -n`、server 的文件描述符限制和 WSL 可用内存，建议继续按单 backend、单 target、短时长逐级扩大。
 
 Node 版本、CPU、内核、文件系统、`oha` 版本和提交号都要写进新的 `records/linux-YYYYMMDD/README.md`。不要把 Linux 结果覆盖 Windows 目录；比较时使用两个目录中的 `index.csv`，按相同的 target、protocol、workload 对齐 `requestsPerSec`、`sizePerSec`、`successRate`、`cpu_avg_percent`、`cpu_peak_percent`、`working_set_avg_bytes` 和 `working_set_peak_bytes`。CPU 和内存的采样来源不同，跨平台比较要保留 `resource_source` 和各自的主机信息。
 

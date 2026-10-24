@@ -28,6 +28,7 @@ struct Row {
   private_bytes_peak_bytes : String
   private_bytes_supported : String
   resource_source : String
+  duration : String
 }
 
 fn arg_value(args : ArrayView[String], name : String, fallback : String) -> String {
@@ -107,6 +108,7 @@ async fn read_index(path : String, rows : Ref[Array[Row]]) -> Unit {
       private_bytes_peak_bytes: field(fields, 15 + shift),
       private_bytes_supported: field(fields, 16 + shift),
       resource_source: field(fields, 17 + shift),
+      duration: field(fields, 19 + shift),
     })
   }
 }
@@ -120,7 +122,7 @@ fn csv_escape(value : String) -> String {
 fn csv_row(row : Row) -> String {
   [
     row.platform, row.backend, row.target, row.protocol, row.workload,
-    row.requests, row.connections, row.exit_code, row.requests_per_sec,
+    row.requests, row.connections, row.duration, row.exit_code, row.requests_per_sec,
     row.size_per_sec, row.success_rate, row.total_seconds, row.total_data_bytes,
     row.cpu_avg_percent, row.cpu_peak_percent, row.working_set_avg_bytes,
     row.working_set_peak_bytes, row.private_bytes_avg_bytes,
@@ -135,10 +137,10 @@ fn display(value : String) -> String {
 
 fn markdown_table(rows : Array[Row]) -> String {
   let out = StringBuilder()
-  out.write_string("| 平台 | backend | target | 协议 | 负载 | 请求/s | bytes/s | 成功率 | CPU 平均% | CPU 峰值% | RSS 平均 bytes | RSS 峰值 bytes |\n")
-  out.write_string("|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|\n")
+  out.write_string("| 平台 | backend | target | 协议 | 负载 | 并发 | 时长 | 请求/s | bytes/s | 成功率 | CPU 平均% | CPU 峰值% | RSS 平均 bytes | RSS 峰值 bytes |\n")
+  out.write_string("|---|---|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|\n")
   for row in rows {
-    out.write_string("| \{row.platform} | \{row.backend} | \{row.target} | \{row.protocol} | \{row.workload} | \{display(row.requests_per_sec)} | \{display(row.size_per_sec)} | \{display(row.success_rate)} | \{display(row.cpu_avg_percent)} | \{display(row.cpu_peak_percent)} | \{display(row.working_set_avg_bytes)} | \{display(row.working_set_peak_bytes)} |\n")
+    out.write_string("| \{row.platform} | \{row.backend} | \{row.target} | \{row.protocol} | \{row.workload} | \{display(row.connections)} | \{display(row.duration)} | \{display(row.requests_per_sec)} | \{display(row.size_per_sec)} | \{display(row.success_rate)} | \{display(row.cpu_avg_percent)} | \{display(row.cpu_peak_percent)} | \{display(row.working_set_avg_bytes)} | \{display(row.working_set_peak_bytes)} |\n")
   }
   out.to_string()
 }
@@ -157,9 +159,10 @@ fn js_quote(value : String) -> String {
 fn html_rows(rows : Array[Row]) -> String {
   let out = StringBuilder()
   for row in rows {
-    out.write_string("<tr data-platform=\"\{html_escape(row.platform)}\" data-backend=\"\{html_escape(row.backend)}\" data-target=\"\{html_escape(row.target)}\" data-protocol=\"\{html_escape(row.protocol)}\" data-workload=\"\{html_escape(row.workload)}\">")
+    out.write_string("<tr data-platform=\"\{html_escape(row.platform)}\" data-backend=\"\{html_escape(row.backend)}\" data-target=\"\{html_escape(row.target)}\" data-protocol=\"\{html_escape(row.protocol)}\" data-workload=\"\{html_escape(row.workload)}\" data-connections=\"\{html_escape(row.connections)}\">")
     for value in [
       row.platform, row.backend, row.target, row.protocol, row.workload,
+      row.connections, row.duration,
       row.requests_per_sec, row.size_per_sec, row.success_rate,
       row.cpu_avg_percent, row.cpu_peak_percent,
       row.working_set_avg_bytes, row.working_set_peak_bytes,
@@ -176,7 +179,7 @@ fn js_data(rows : Array[Row]) -> String {
   for row in rows {
     if !first { out.write_char(',') }
     first = false
-    out.write_string("{platform:\{js_quote(row.platform)},backend:\{js_quote(row.backend)},target:\{js_quote(row.target)},protocol:\{js_quote(row.protocol)},workload:\{js_quote(row.workload)},rps:\{js_quote(row.requests_per_sec)},mib:\{js_quote(row.size_per_sec)},cpu:\{js_quote(row.cpu_avg_percent)},rss:\{js_quote(row.working_set_avg_bytes)}}")
+    out.write_string("{platform:\{js_quote(row.platform)},backend:\{js_quote(row.backend)},target:\{js_quote(row.target)},protocol:\{js_quote(row.protocol)},workload:\{js_quote(row.workload)},connections:\{js_quote(row.connections)},duration:\{js_quote(row.duration)},rps:\{js_quote(row.requests_per_sec)},mib:\{js_quote(row.size_per_sec)},cpu:\{js_quote(row.cpu_avg_percent)},rss:\{js_quote(row.working_set_avg_bytes)}}")
   }
   out.write_char(']')
   out.to_string()
@@ -185,19 +188,19 @@ fn js_data(rows : Array[Row]) -> String {
 async fn write_report(out_dir : String, rows : Array[Row]) -> Unit {
   if !@fs.exists(out_dir) { @fs.mkdir(out_dir, recursive=true) }
   let csv = StringBuilder()
-  csv.write_string("platform,backend,target,protocol,workload,requests,connections,exit_code,requests_per_sec,size_per_sec,success_rate,total_seconds,total_data_bytes,cpu_avg_percent,cpu_peak_percent,working_set_avg_bytes,working_set_peak_bytes,private_bytes_avg_bytes,private_bytes_peak_bytes,private_bytes_supported,resource_source,output\n")
+  csv.write_string("platform,backend,target,protocol,workload,requests,connections,duration,exit_code,requests_per_sec,size_per_sec,success_rate,total_seconds,total_data_bytes,cpu_avg_percent,cpu_peak_percent,working_set_avg_bytes,working_set_peak_bytes,private_bytes_avg_bytes,private_bytes_peak_bytes,private_bytes_supported,resource_source,output\n")
   for row in rows { csv.write_string(csv_row(row) + "\n") }
   @fs.write_file(out_dir + "/summary.csv", csv.to_string())
 
   let markdown = StringBuilder()
   markdown.write_string("# http-server-mbt benchmark comparison\n\n")
-  markdown.write_string("本报告合并 Windows `oha` 基线与 WSL Linux 的 `platform`、`epoll`、`io_uring` 记录。大文件看请求/s 与 bytes/s（HTML 图表将 bytes/s 换算为 MiB/s），小文件看请求/s；CPU 和 RSS 只采样 server 进程。Linux private bytes 不可用，Thin HTTPS 是设计上的 unsupported。\n\n")
+  markdown.write_string("本报告合并 Windows `oha` 基线与 WSL Linux 的 `platform`、`epoll`、`io_uring` 记录。大文件看请求/s 与 bytes/s（HTML 图表将 bytes/s 换算为 MiB/s），小文件看请求/s；CPU 和 RSS 只采样 server 进程。Linux private bytes 不可用，Thin HTTPS 是设计上的 unsupported。并发扫描行的 `duration` 表示 `oha -z` 窗口；大文件在窗口内没有完成响应时，JSON 会把 `successRate` 和 `bytes/s` 留空或置零，这表示该并发点未达到可比较的完成吞吐。\n\n")
   markdown.write_string(markdown_table(rows))
   @fs.write_file(out_dir + "/comparison.md", markdown.to_string())
 
   let body = html_rows(rows)
   let data = js_data(rows)
-  let html = "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>http-server-mbt benchmark</title><style>body{font:14px system-ui,sans-serif;margin:24px;background:#fff;color:#202124}select{margin-right:12px;padding:4px}table{border-collapse:collapse;width:100%;font-size:12px}th,td{border:1px solid #dadce0;padding:5px;text-align:right}th:nth-child(-n+5),td:nth-child(-n+5){text-align:left}th{position:sticky;top:0;background:#fff}.chart{margin:20px 0}.bar{display:flex;gap:8px;align-items:center;margin:4px 0}.name{width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.track{height:16px;background:#e8eaed;flex:1}.fill{height:100%;background:#1769aa}.value{width:100px;text-align:right;color:#5f6368}@media(prefers-color-scheme:dark){body{background:#202124;color:#e8eaed}th{background:#202124}select{background:#202124;color:#e8eaed}.track{background:#5f6368}.fill{background:#8ab4f8}}</style></head><body><h1>http-server-mbt benchmark comparison</h1><p>Windows baseline versus WSL Linux backends; server CPU/RSS exclude the load generator.</p><div id=\"filters\"></div><div id=\"charts\"></div><h2>All cases</h2><div style=\"overflow:auto\"><table id=\"table\"><thead><tr><th>platform</th><th>backend</th><th>target</th><th>protocol</th><th>workload</th><th>requests/s</th><th>bytes/s</th><th>success</th><th>CPU avg%</th><th>CPU peak%</th><th>RSS avg bytes</th><th>RSS peak bytes</th></tr></thead><tbody>" + body + "</tbody></table></div><script>const data=" + data + ";const fields=['platform','backend','target','protocol','workload'];const labels={rps:'requests/s',mib:'MiB/s',cpu:'CPU average %',rss:'RSS average MiB'};const filters=document.getElementById('filters');const selects={};for(const f of fields){const s=document.createElement('select');s.id=f;s.innerHTML='<option>all</option>';for(const v of [...new Set(data.map(x=>x[f]))].sort())s.innerHTML+='<option>'+v+'</option>';s.onchange=render;filters.append(f+' ',s);selects[f]=s}function rows(){return data.filter(x=>fields.every(f=>selects[f].value==='all'||selects[f].value===x[f]))}function render(){const rs=rows();document.querySelectorAll('#table tbody tr').forEach(t=>t.style.display=fields.every(f=>selects[f].value==='all'||selects[f].value===t.dataset[f])?'':'none');const root=document.getElementById('charts');root.innerHTML='';for(const k of ['rps','mib','cpu','rss']){const vals=rs.map(x=>[x,k==='mib'?Number(x[k])/1048576:Number(x[k])]).filter(x=>Number.isFinite(x[1]));const box=document.createElement('section');box.className='chart';box.innerHTML='<h2>'+labels[k]+'</h2>';const max=Math.max(...vals.map(x=>x[1]),1);for(const [x,v] of vals.sort((a,b)=>b[1]-a[1])){const b=document.createElement('div');b.className='bar';const n=document.createElement('span');n.className='name';n.textContent=[x.platform,x.backend,x.target,x.protocol,x.workload].join(' / ');const t=document.createElement('span');t.className='track';const fill=document.createElement('span');fill.className='fill';fill.style.width=v/max*100+'%';t.append(fill);const q=document.createElement('span');q.className='value';q.textContent=k==='rss'?(v/1048576).toFixed(1)+' MiB':k==='mib'?v.toFixed(2)+' MiB/s':v.toFixed(2);b.append(n,t,q);box.append(b)}root.append(box)}}render();</script></body></html>"
+  let html = "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>http-server-mbt benchmark</title><style>body{font:14px system-ui,sans-serif;margin:24px;background:#fff;color:#202124}select{margin-right:12px;padding:4px}table{border-collapse:collapse;width:100%;font-size:12px}th,td{border:1px solid #dadce0;padding:5px;text-align:right}th:nth-child(-n+5),td:nth-child(-n+5){text-align:left}th{position:sticky;top:0;background:#fff}.chart{margin:20px 0}.bar{display:flex;gap:8px;align-items:center;margin:4px 0}.name{width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.track{height:16px;background:#e8eaed;flex:1}.fill{height:100%;background:#1769aa}.value{width:100px;text-align:right;color:#5f6368}@media(prefers-color-scheme:dark){body{background:#202124;color:#e8eaed}th{background:#202124}select{background:#202124;color:#e8eaed}.track{background:#5f6368}.fill{background:#8ab4f8}}</style></head><body><h1>http-server-mbt benchmark comparison</h1><p>Windows baseline versus WSL Linux backends; server CPU/RSS exclude the load generator. Concurrency and duration are shown per row.</p><div id=\"filters\"></div><div id=\"charts\"></div><h2>All cases</h2><div style=\"overflow:auto\"><table id=\"table\"><thead><tr><th>platform</th><th>backend</th><th>target</th><th>protocol</th><th>workload</th><th>requests/s</th><th>bytes/s</th><th>success</th><th>CPU avg%</th><th>CPU peak%</th><th>RSS avg bytes</th><th>RSS peak bytes</th></tr></thead><tbody>" + body + "</tbody></table></div><script>const data=" + data + ";const fields=['platform','backend','target','protocol','workload','connections'];const labels={rps:'requests/s',mib:'MiB/s',cpu:'CPU average %',rss:'RSS average MiB'};const filters=document.getElementById('filters');const selects={};for(const f of fields){const s=document.createElement('select');s.id=f;s.innerHTML='<option>all</option>';for(const v of [...new Set(data.map(x=>x[f]))].sort())s.innerHTML+='<option>'+v+'</option>';s.onchange=render;filters.append(f+' ',s);selects[f]=s}function rows(){return data.filter(x=>fields.every(f=>selects[f].value==='all'||selects[f].value===x[f]))}function render(){const rs=rows();document.querySelectorAll('#table tbody tr').forEach(t=>t.style.display=fields.every(f=>selects[f].value==='all'||selects[f].value===t.dataset[f])?'':'none');const root=document.getElementById('charts');root.innerHTML='';for(const k of ['rps','mib','cpu','rss']){const vals=rs.map(x=>[x,k==='mib'?Number(x[k])/1048576:Number(x[k])]).filter(x=>Number.isFinite(x[1]));const box=document.createElement('section');box.className='chart';box.innerHTML='<h2>'+labels[k]+'</h2>';const max=Math.max(...vals.map(x=>x[1]),1);for(const [x,v] of vals.sort((a,b)=>b[1]-a[1])){const b=document.createElement('div');b.className='bar';const n=document.createElement('span');n.className='name';n.textContent=[x.platform,x.backend,x.target,x.protocol,x.workload,'c='+x.connections,x.duration].join(' / ');const t=document.createElement('span');t.className='track';const fill=document.createElement('span');fill.className='fill';fill.style.width=v/max*100+'%';t.append(fill);const q=document.createElement('span');q.className='value';q.textContent=k==='rss'?(v/1048576).toFixed(1)+' MiB':k==='mib'?v.toFixed(2)+' MiB/s':v.toFixed(2);b.append(n,t,q);box.append(b)}root.append(box)}}render();</script></body></html>"
   @fs.write_file(out_dir + "/report.html", html)
 }
 
@@ -212,6 +215,17 @@ async fn main {
     arg_value(args, "--linux-io-uring", "records/linux-20261024-io_uring"),
   ]
   for dir in dirs { read_index(dir + "/index.csv", rows) }
+  let concurrency_roots = arg_value(args, "--concurrency-root", "").split(",")
+  for concurrency_root_view in concurrency_roots {
+    let concurrency_root = concurrency_root_view.trim().to_owned()
+    if concurrency_root != "" {
+      let entries = @fs.readdir(concurrency_root, sort=true) catch { _ => [] }
+      for entry in entries {
+        let index = concurrency_root + "/" + entry + "/index.csv"
+        read_index(index, rows)
+      }
+    }
+  }
   write_report(out_dir, rows.val)
   println("rows=" + rows.val.length().to_string())
   println("out=" + out_dir)
