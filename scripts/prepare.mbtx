@@ -1,0 +1,112 @@
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/io",
+  "moonbitlang/async/shell",
+  "moonbitlang/core/env",
+}
+
+fn arg_value(args : ArrayView[String], name : String, fallback : String) -> String {
+  for i = 1; i < args.length(); i = i + 1 {
+    if args[i] == name && i + 1 < args.length() {
+      return args[i + 1]
+    }
+    if args[i].has_prefix(name + "=") {
+      return args[i][name.length() + 1:].to_owned()
+    }
+  }
+  fallback
+}
+
+fn positive(value : String, fallback : Int) -> Int {
+  if value.length() == 0 {
+    return fallback
+  }
+  let mut n = 0
+  for c in value {
+    if c < '0' || c > '9' {
+      return fallback
+    }
+    n = n * 10 + c.to_int() - '0'.to_int()
+  }
+  if n > 0 { n } else { fallback }
+}
+
+fn make_bytes(size : Int, seed : Int) -> Bytes {
+  let data = FixedArray::make(size, b'\x00')
+  for i = 0; i < size; i = i + 1 {
+    data[i] = (seed + i % 251).to_byte()
+  }
+  data.unsafe_reinterpret_as_bytes()
+}
+
+async fn write_large(path : String, size : Int) -> Unit {
+  let chunk = make_bytes(1024 * 1024, 17)
+  @fs.write_file(path, b"", append=false)
+  let mut remaining = size
+  while remaining > 0 {
+    let count = if remaining < chunk.length() { remaining } else { chunk.length() }
+    @fs.write_file(
+      path,
+      chunk[:count],
+      create_mode=@fs.CreateMode::OpenOrCreate,
+      append=true,
+    )
+    remaining -= count
+  }
+}
+
+async fn write_small_files(root : String, count : Int, size : Int) -> Unit {
+  if !@fs.exists(root) {
+    @fs.mkdir(root, recursive=true)
+  }
+  let payload = make_bytes(size, 61)
+  let urls = StringBuilder()
+  for i = 0; i < count; i = i + 1 {
+
+    let path = root + "/" + i.to_string() + ".txt"
+    @fs.write_file(path, payload)
+    urls.write_string("/small/" + i.to_string() + ".txt\n")
+  }
+  @fs.write_file("data/urls-small.txt", urls.to_string())
+}
+
+async fn ensure_certificates() -> Unit {
+  if !@fs.exists("state/certs") {
+    @fs.mkdir("state/certs", recursive=true)
+  }
+  let cert = "state/certs/server.crt"
+  let key = "state/certs/server.key"
+  if !(@fs.exists(cert) && @fs.exists(key)) {
+    @shell.Cmd(
+      "openssl",
+      [
+        "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+        "-keyout", key, "-out", cert, "-days", "3650",
+        "-subj", "/CN=localhost",
+      ],
+      stdout=@shell.Redirect::Discard,
+      stderr=@shell.Redirect::Discard,
+    ).run()
+  }
+}
+
+async fn main {
+  let args = @env.args()
+  let large_bytes = positive(arg_value(args, "--large-bytes", "67108864"), 64 * 1024 * 1024)
+  let small_count = positive(arg_value(args, "--small-count", "2048"), 2048)
+  let small_bytes = positive(arg_value(args, "--small-bytes", "1024"), 1024)
+  if !@fs.exists("data/public") {
+    @fs.mkdir("data/public", recursive=true)
+  }
+  @fs.write_file("data/public/index.html", "benchmark\n")
+  write_large("data/public/large.bin", large_bytes)
+  write_small_files("data/public/small", small_count, small_bytes)
+  ensure_certificates()
+  println("fixture_root=data/public")
+  println("large_bytes=" + large_bytes.to_string())
+  println("small_count=" + small_count.to_string())
+  println("small_bytes=" + small_bytes.to_string())
+  println("cert=state/certs/server.crt")
+  println("key=state/certs/server.key")
+}

@@ -1,0 +1,327 @@
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/process",
+  "moonbitlang/async/shell",
+  "moonbitlang/core/env",
+}
+
+struct Target {
+  name : String
+  program : String
+  args : Array[String]
+}
+
+fn arg_value(args : ArrayView[String], name : String, fallback : String) -> String {
+  for i = 1; i < args.length(); i = i + 1 {
+    if args[i] == name && i + 1 < args.length() {
+      return args[i + 1]
+    }
+    if args[i].has_prefix(name + "=") {
+      return args[i][name.length() + 1:].to_owned()
+    }
+  }
+  fallback
+}
+
+fn positive(value : String, fallback : Int) -> Int {
+  if value.length() == 0 { return fallback }
+  let mut n = 0
+  for c in value {
+    if c < '0' || c > '9' { return fallback }
+    n = n * 10 + c.to_int() - '0'.to_int()
+  }
+  if n > 0 { n } else { fallback }
+}
+
+fn selected(filter : String, name : String) -> Bool {
+  filter == "" || filter == "all" || filter == name
+}
+
+fn url(scheme : String, port : String, path : String) -> String {
+  "\{scheme}://127.0.0.1:\{port}\{path}"
+}
+
+fn node_program(_project : String) -> String {
+  @env.get_env_var("HS_NODE").unwrap_or("node")
+}
+
+fn cli_program(project : String, full : Bool, windows : Bool) -> String {
+  let suffix = if windows { ".exe" } else { "" }
+  let flavor = if full { "http-server-mbt" } else { "http-server-mbt-thin" }
+  @env.get_env_var(if full { "HS_CLI_FULL" } else { "HS_CLI_THIN" }).unwrap_or(
+    project + "/target/candidate/cli/" + flavor +
+      (if windows { "-windows-amd64" } else { "-linux-x64" }) + suffix,
+  )
+}
+
+fn target_list(
+  project : String,
+  windows : Bool,
+  port : String,
+  root : String,
+  _cert : String,
+  _key : String,
+) -> Array[Target] {
+  let node = node_program(project)
+  let full_cli = cli_program(project, true, windows)
+  let thin_cli = cli_program(project, false, windows)
+  let original = @env.get_env_var("HS_ORIGINAL_BIN").unwrap_or(
+    project + "/http-server/bin/http-server",
+  )
+  [
+    {
+      name: "cli-full",
+      program: full_cli,
+      args: ["--silent", "--port", port, root],
+    },
+    {
+      name: "cli-thin",
+      program: thin_cli,
+      args: ["--silent", "--port", port, root],
+    },
+    {
+      name: "napi",
+      program: node,
+      args: ["hosts/napi-server.mjs"],
+    },
+    {
+      name: "wasmgc",
+      program: node,
+      args: ["hosts/wasm-server.mjs"],
+    },
+    {
+      name: "original",
+      program: node,
+      args: [original, "-s", "-p", port, root],
+    },
+  ]
+}
+
+fn with_tls_args(target : Target, protocol : String, cert : String, key : String) -> Target {
+  if protocol != "https" { return target }
+  if target.name == "cli-full" {
+    { ..target, args: [..target.args, "--cert", cert, "--key", key], }
+  } else if target.name == "original" {
+    { ..target, args: [..target.args, "-S", "-C", cert, "-K", key], }
+  } else {
+    target
+  }
+}
+
+fn target_env(
+  target : Target,
+  project : String,
+  port : String,
+  protocol : String,
+  root : String,
+  cert : String,
+  key : String,
+) -> Map[String, String] {
+  let env : Map[String, String] = Map([])
+  if target.name == "napi" || target.name == "wasmgc" {
+    env["HS_PROJECT_ROOT"] = project
+    env["HS_ROOT"] = root
+    env["HS_CONFIG"] = "{\"root\":\"" + root + "\"}"
+    if protocol == "https" {
+      env["HS_TLS"] = "1"
+      env["HS_CERT"] = cert
+      env["HS_KEY"] = key
+    }
+  }
+  env["PORT"] = port
+  env
+}
+
+async fn write_urls(protocol : String, port : String, count : Int, small_count : Int) -> String {
+  let scheme = if protocol == "https" { "https" } else { "http" }
+  let path = "state/urls-\{protocol}.txt"
+  let urls = StringBuilder()
+  for i = 0; i < count; i = i + 1 {
+    let index = i % small_count
+    urls.write_string(url(scheme, port, "/small/\{index}.txt"))
+    urls.write_char('\n')
+  }
+  @fs.write_file(path, urls.to_string())
+  path
+}
+
+async fn ready(
+  scheme : String,
+  port : String,
+  insecure : Bool,
+) -> Bool {
+  let probe_url = url(scheme, port, "/index.html")
+  let curl = if @env.get_env_var("OS") == Some("Windows_NT") {
+    "curl.exe"
+  } else {
+    "curl"
+  }
+  let mut ok = false
+  for _ in 0..<30 {
+    if !ok {
+      let args = ["-fsS", "--max-time", "0.2", "-o", if @env.get_env_var("OS") == Some("Windows_NT") { "NUL" } else { "/dev/null" }]
+      if insecure { args.push("-k") }
+      args.push(probe_url)
+      ok = @shell.Cmd(
+        curl,
+        args,
+        stdout=@shell.Redirect::Discard,
+        stderr=@shell.Redirect::Discard,
+      ).status() == 0
+      if !ok { @async.sleep(100) }
+    }
+  }
+  ok
+}
+
+async fn run_case(
+  target : Target,
+  project : String,
+  root : String,
+  protocol : String,
+  workload : String,
+  port : String,
+  requests : Int,
+  connections : Int,
+  small_count : Int,
+  cert : String,
+  key : String,
+  platform : String,
+  result_dir : String,
+) -> Unit {
+  let scheme = if protocol == "https" { "https" } else { "http" }
+  let insecure = protocol == "https"
+  let case_name = "\{platform}-\{target.name}-\{protocol}-\{workload}"
+  let output = "\{result_dir}/\{case_name}.json"
+  let stdout_log = "\{result_dir}/logs/\{case_name}.stdout.log"
+  let stderr_log = "\{result_dir}/logs/\{case_name}.stderr.log"
+  let command = with_tls_args(target, protocol, cert, key)
+  let env = target_env(command, project, port, protocol, root, cert, key)
+  let oha_args = if workload == "large" {
+    let args = [
+      "--no-tui", "-n", requests.to_string(), "-c", connections.to_string(),
+      "--output-format", "json", "--output", output,
+    ]
+    if insecure { args.push("--insecure") }
+    args.push(url(scheme, port, "/large.bin"))
+    args
+  } else {
+    let urls = write_urls(protocol, port, requests, small_count)
+    let args = [
+      "--no-tui", "-n", requests.to_string(), "-c", connections.to_string(),
+      "--output-format", "json", "--output", output, "--urls-from-file",
+    ]
+    if insecure { args.push("--insecure") }
+    args.push(urls)
+    args
+  }
+  @async.with_task_group() <| group => {
+    let stdout = @process.redirect_to_file(stdout_log)
+    let stderr = @process.redirect_to_file(stderr_log)
+    let process = @process.spawn(
+      group,
+      command.program,
+      command.args,
+      extra_env=env,
+      stdout=stdout,
+      stderr=stderr,
+      no_console_window=true,
+      cancel_handler=@process.hard_cancel(),
+    )
+    let is_ready = ready(scheme, port, insecure)
+    let mut exit_code = -1
+    if is_ready {
+      exit_code = @shell.Cmd(
+        "oha",
+        oha_args,
+        env=Map([("NO_COLOR", "true")]),
+        stdout=@shell.Redirect::Discard,
+        stderr=@shell.Redirect::Discard,
+      ).status()
+    }
+    process.cancel()
+    ignore(process.wait())
+    if !is_ready {
+      println("FAILED readiness: \{case_name}; see \{stderr_log}")
+    }
+    @fs.write_file(
+      "\{result_dir}/index.csv",
+      "\{platform},\{target.name},\{protocol},\{workload},\{requests},\{connections},\{exit_code},\{output}\n",
+      create_mode=@fs.CreateMode::OpenOrCreate,
+      append=true,
+    )
+    println("case=\{case_name} ready=\{is_ready} exit=\{exit_code}")
+  }
+}
+
+async fn main {
+  let args = @env.args()
+  let project = @env.get_env_var("HS_PROJECT_ROOT").unwrap_or(
+    arg_value(args, "--project-root", ""),
+  )
+  if project == "" {
+    fail("HS_PROJECT_ROOT or --project-root is required")
+  }
+  let platform = @env.get_env_var("BENCH_PLATFORM").unwrap_or(
+    if @env.get_env_var("OS") == Some("Windows_NT") { "windows" } else { "linux" },
+  )
+  let windows = platform == "windows"
+  let root = arg_value(args, "--root", "data/public")
+  let port = arg_value(args, "--port", "18080")
+  let requests = positive(arg_value(args, "--requests", "12"), 12)
+  let connections = positive(arg_value(args, "--connections", "4"), 4)
+  let small_count = positive(arg_value(args, "--small-count", "2048"), 2048)
+  let target_filter = arg_value(args, "--target", "all")
+  let protocol_filter = arg_value(args, "--protocol", "all")
+  let workload_filter = arg_value(args, "--workload", "all")
+  let cert = arg_value(args, "--cert", "state/certs/server.crt")
+  let key = arg_value(args, "--key", "state/certs/server.key")
+  let result_dir = @env.get_env_var("BENCH_RESULT_DIR").unwrap_or("results")
+  if !@fs.exists(result_dir + "/logs") {
+    @fs.mkdir(result_dir + "/logs", recursive=true)
+  }
+  @fs.write_file(
+    result_dir + "/index.csv",
+    "platform,target,protocol,workload,requests,connections,exit_code,output\n",
+    append=false,
+  )
+  let targets = target_list(project, windows, port, root, cert, key)
+  for target in targets {
+    if selected(target_filter, target.name) {
+      for protocol in ["http", "https"] {
+        if selected(protocol_filter, protocol) {
+          if protocol == "https" && target.name == "cli-thin" {
+            @fs.write_file(
+              result_dir + "/index.csv",
+              "\{platform},\{target.name},\{protocol},unsupported,0,0,0,\n",
+              create_mode=@fs.CreateMode::OpenOrCreate,
+              append=true,
+            )
+            println("case=\{platform}-\{target.name}-\{protocol} skipped=unsupported")
+          } else {
+            for workload in ["large", "small-files"] {
+              if selected(workload_filter, workload) {
+                run_case(
+                  target,
+                  project,
+                  root,
+                  protocol,
+                  workload,
+                  port,
+                  if workload == "large" { requests } else { small_count },
+                  connections,
+                  small_count,
+                  cert,
+                  key,
+                  platform,
+                  result_dir,
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
