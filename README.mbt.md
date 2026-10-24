@@ -20,6 +20,12 @@
 
 `run.mbtx` 使用 HTTP keep-alive、并发 4；大文件请求数默认 12，小文件 case 默认覆盖 2048 个 URL。Windows 基线记录使用 4 个大文件请求以缩短首轮耗时，具体参数写在对应记录 README。HTTPS 请求只对本地证书使用 `--insecure`。
 
+## CPU 和内存记录
+
+每个 server 进程启动后，`run.mbtx` 每 250 ms 采样一次，并在请求结束、终止 server 前再采样一次。采样器只查询被测进程的 PID，不把 `oha`、PowerShell 或 `ps` 的资源计入被测进程。每个 case 会生成 `resources/<case>.csv`，包含采样时间、原始 CPU 值、CPU 百分比、工作集/RSS 和 Private Bytes；`index.csv` 同时保存有效 CPU 样本数、平均/峰值 CPU 百分比，以及平均/峰值工作集。
+
+Windows 的 CPU 使用 `Get-Process.TotalProcessorTime.Ticks` 与采样间隔计算，内存使用 Working Set 和 Private Bytes。Linux 使用 `ps %cpu` 与 RSS（KiB 转字节）；Linux 没有可直接对应的 Private Bytes，因此该两列为空并将 `private_bytes_supported` 设为 `false`。逐样本 CSV 的 `cpu_raw` 在 Windows 是累计 ticks，在 Linux 是 `ps` 百分比乘 100。CPU 平均值只包含有时间间隔的样本；短 case 可能只有最终的很短间隔，结果应结合 `resource_samples` 和逐样本 CSV 阅读。监控命令的开销不计入 server 指标，但会给主机增加少量负载。
+
 ## Windows 首次运行
 
 在本仓库根目录执行：
@@ -27,10 +33,10 @@
 ```powershell
 moon run scripts/prepare.mbtx
 
-$env:HS_PROJECT_ROOT = 'D:/project/moonbit/http-server'
+$env:HS_PROJECT_ROOT = 'D:/project/moonbit/http-server-mbt'
 $env:HS_NODE = 'D:/project/moonbit/http-server-mbt/target/node24/node.exe'
 $env:BENCH_PLATFORM = 'windows'
-$env:BENCH_RESULT_DIR = 'records/windows-20261024'
+$env:BENCH_RESULT_DIR = 'records/windows-20261024-resources'
 moon run scripts/run.mbtx -- --project-root $env:HS_PROJECT_ROOT --requests 4 --connections 4 --small-count 2048
 ```
 
@@ -40,7 +46,7 @@ Node-API 和 WasmGC 需要当前项目已经有 `target/node/http_server.win32-x
 npm ci --ignore-scripts
 ```
 
-若只想试一个 case，可以增加 `--target cli-thin|cli-full|napi|wasmgc|original`、`--protocol http|https` 或 `--workload large|small-files`。默认结果写入被忽略的 `results/`；设置 `BENCH_RESULT_DIR` 后可把 JSON、日志和 `index.csv` 保存到可提交的记录目录。
+若只想试一个 case，可以增加 `--target cli-thin|cli-full|napi|wasmgc|original`、`--protocol http|https` 或 `--workload large|small-files`。默认结果写入被忽略的 `results/`；设置 `BENCH_RESULT_DIR` 后可把 JSON、日志、资源 CSV 和 `index.csv` 保存到可提交的记录目录。
 
 ## Linux 复跑
 
@@ -58,8 +64,8 @@ export BENCH_RESULT_DIR=records/linux-YYYYMMDD
 moon run scripts/run.mbtx -- --project-root "$HS_PROJECT_ROOT" --requests 4 --connections 4 --small-count 2048
 ```
 
-Node 版本、CPU、内核、文件系统、`oha` 版本和提交号都要写进新的 `records/linux-YYYYMMDD/README.md`。不要把 Linux 结果覆盖 Windows 目录；比较时使用两个目录中的 `index.csv`，按相同的 target、protocol、workload 对齐 `requestsPerSec`、`sizePerSec` 和 `successRate`。
+Node 版本、CPU、内核、文件系统、`oha` 版本和提交号都要写进新的 `records/linux-YYYYMMDD/README.md`。不要把 Linux 结果覆盖 Windows 目录；比较时使用两个目录中的 `index.csv`，按相同的 target、protocol、workload 对齐 `requestsPerSec`、`sizePerSec`、`successRate`、`cpu_avg_percent`、`cpu_peak_percent`、`working_set_avg_bytes` 和 `working_set_peak_bytes`。CPU 和内存的采样来源不同，跨平台比较要保留 `resource_source` 和各自的主机信息。
 
 ## 记录和解释
 
-[records/windows-20261024](records/windows-20261024/README.md) 是本机首轮结果，旁边的 JSON 是 `oha --output-format json` 原始输出。它们是一次观测，不是性能门槛；重复运行时应保留每次的目录。WasmGC HTTPS 和 Native HTTPS 的 TLS 终止位置不同，跨实现比较时需要单独标注。Windows 与 Linux 的差异应和工具链、Node 版本、CPU、内核及文件系统一起阅读，不能只比较单个数字。
+[records/windows-20261024-resources](records/windows-20261024-resources/README.md) 是带 CPU/内存采样的本机首轮结果；[records/windows-20261024](records/windows-20261024/README.md) 保留不含资源列的早期结果。JSON 是 `oha --output-format json` 原始输出，`resources/` 保存逐样本资源数据。它们是一次观测，不是性能门槛；重复运行时应保留每次的目录。WasmGC HTTPS 和 Native HTTPS 的 TLS 终止位置不同，跨实现比较时需要单独标注。Windows 与 Linux 的差异应和工具链、Node 版本、CPU、内核及文件系统一起阅读，不能只比较单个数字。

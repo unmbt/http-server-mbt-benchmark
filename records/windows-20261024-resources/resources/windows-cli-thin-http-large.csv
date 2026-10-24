@@ -1,0 +1,3 @@
+timestamp_ms,cpu_raw,cpu_percent,working_set_bytes,private_bytes
+1819428598,3593750,,9994240,1974272
+1819429041,3593750,0.00,9994240,1974272
