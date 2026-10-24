@@ -118,7 +118,7 @@ Node 版本、CPU、内核、文件系统、`oha` 版本和提交号都要写进
 moon run scripts/report.mbtx -- --out records/20261024-comparison
 ```
 
-它生成 `summary.csv`、`comparison.md` 和自包含的 `report.html`。HTML 可以按平台、backend、target、协议和负载筛选，并绘制请求速率、MiB/s、CPU 平均值和 RSS 平均值。
+它生成 `summary.csv`、`comparison.md` 和交互式 `report.html`。HTML 使用 ECharts 绘制吞吐/成功率趋势、排行和 CPU/RSS 散点图，支持平台、backend、target、协议、负载、并发的组合筛选，指标切换、明细排序以及浅色/深色模式；ECharts CDN 不可用时仍保留可筛选表格。
 
 ## 记录和解释
 

@@ -166,6 +166,7 @@ fn html_rows(rows : Array[Row]) -> String {
       row.requests_per_sec, row.size_per_sec, row.success_rate,
       row.cpu_avg_percent, row.cpu_peak_percent,
       row.working_set_avg_bytes, row.working_set_peak_bytes,
+      row.exit_code,
     ] { out.write_string("<td>" + html_escape(display(value)) + "</td>") }
     out.write_string("</tr>\n")
   }
@@ -179,7 +180,7 @@ fn js_data(rows : Array[Row]) -> String {
   for row in rows {
     if !first { out.write_char(',') }
     first = false
-    out.write_string("{platform:\{js_quote(row.platform)},backend:\{js_quote(row.backend)},target:\{js_quote(row.target)},protocol:\{js_quote(row.protocol)},workload:\{js_quote(row.workload)},connections:\{js_quote(row.connections)},duration:\{js_quote(row.duration)},rps:\{js_quote(row.requests_per_sec)},mib:\{js_quote(row.size_per_sec)},cpu:\{js_quote(row.cpu_avg_percent)},rss:\{js_quote(row.working_set_avg_bytes)}}")
+    out.write_string("{platform:\{js_quote(row.platform)},backend:\{js_quote(row.backend)},target:\{js_quote(row.target)},protocol:\{js_quote(row.protocol)},workload:\{js_quote(row.workload)},connections:\{js_quote(row.connections)},duration:\{js_quote(row.duration)},rps:\{js_quote(row.requests_per_sec)},bytes:\{js_quote(row.size_per_sec)},success:\{js_quote(row.success_rate)},cpu:\{js_quote(row.cpu_avg_percent)},cpuPeak:\{js_quote(row.cpu_peak_percent)},rss:\{js_quote(row.working_set_avg_bytes)},rssPeak:\{js_quote(row.working_set_peak_bytes)},exit:\{js_quote(row.exit_code)}}")
   }
   out.write_char(']')
   out.to_string()
@@ -200,7 +201,12 @@ async fn write_report(out_dir : String, rows : Array[Row]) -> Unit {
 
   let body = html_rows(rows)
   let data = js_data(rows)
-  let html = "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>http-server-mbt benchmark</title><style>body{font:14px system-ui,sans-serif;margin:24px;background:#fff;color:#202124}select{margin-right:12px;padding:4px}table{border-collapse:collapse;width:100%;font-size:12px}th,td{border:1px solid #dadce0;padding:5px;text-align:right}th:nth-child(-n+5),td:nth-child(-n+5){text-align:left}th{position:sticky;top:0;background:#fff}.chart{margin:20px 0}.bar{display:flex;gap:8px;align-items:center;margin:4px 0}.name{width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.track{height:16px;background:#e8eaed;flex:1}.fill{height:100%;background:#1769aa}.value{width:100px;text-align:right;color:#5f6368}@media(prefers-color-scheme:dark){body{background:#202124;color:#e8eaed}th{background:#202124}select{background:#202124;color:#e8eaed}.track{background:#5f6368}.fill{background:#8ab4f8}}</style></head><body><h1>http-server-mbt benchmark comparison</h1><p>Windows baseline versus WSL Linux backends; server CPU/RSS exclude the load generator. Concurrency and duration are shown per row.</p><div id=\"filters\"></div><div id=\"charts\"></div><h2>All cases</h2><div style=\"overflow:auto\"><table id=\"table\"><thead><tr><th>platform</th><th>backend</th><th>target</th><th>protocol</th><th>workload</th><th>requests/s</th><th>bytes/s</th><th>success</th><th>CPU avg%</th><th>CPU peak%</th><th>RSS avg bytes</th><th>RSS peak bytes</th></tr></thead><tbody>" + body + "</tbody></table></div><script>const data=" + data + ";const fields=['platform','backend','target','protocol','workload','connections'];const labels={rps:'requests/s',mib:'MiB/s',cpu:'CPU average %',rss:'RSS average MiB'};const filters=document.getElementById('filters');const selects={};for(const f of fields){const s=document.createElement('select');s.id=f;s.innerHTML='<option>all</option>';for(const v of [...new Set(data.map(x=>x[f]))].sort())s.innerHTML+='<option>'+v+'</option>';s.onchange=render;filters.append(f+' ',s);selects[f]=s}function rows(){return data.filter(x=>fields.every(f=>selects[f].value==='all'||selects[f].value===x[f]))}function render(){const rs=rows();document.querySelectorAll('#table tbody tr').forEach(t=>t.style.display=fields.every(f=>selects[f].value==='all'||selects[f].value===t.dataset[f])?'':'none');const root=document.getElementById('charts');root.innerHTML='';for(const k of ['rps','mib','cpu','rss']){const vals=rs.map(x=>[x,k==='mib'?Number(x[k])/1048576:Number(x[k])]).filter(x=>Number.isFinite(x[1]));const box=document.createElement('section');box.className='chart';box.innerHTML='<h2>'+labels[k]+'</h2>';const max=Math.max(...vals.map(x=>x[1]),1);for(const [x,v] of vals.sort((a,b)=>b[1]-a[1])){const b=document.createElement('div');b.className='bar';const n=document.createElement('span');n.className='name';n.textContent=[x.platform,x.backend,x.target,x.protocol,x.workload,'c='+x.connections,x.duration].join(' / ');const t=document.createElement('span');t.className='track';const fill=document.createElement('span');fill.className='fill';fill.style.width=v/max*100+'%';t.append(fill);const q=document.createElement('span');q.className='value';q.textContent=k==='rss'?(v/1048576).toFixed(1)+' MiB':k==='mib'?v.toFixed(2)+' MiB/s':v.toFixed(2);b.append(n,t,q);box.append(b)}root.append(box)}}render();</script></body></html>"
+  let template = @fs.read_file("scripts/report-template.html").text() catch {
+    _ => fail("scripts/report-template.html is required to generate report.html")
+  }
+  let html = template
+    .replace_all(old="__TABLE_BODY__", new=body)
+    .replace_all(old="__BENCHMARK_DATA__", new=data)
   @fs.write_file(out_dir + "/report.html", html)
 }
 
